@@ -78,7 +78,7 @@ Dependencies:
 ```
 mkdir build
 cd build
-export CUDA_PATH=/usr/local/cuda-12.8/
+export CUDA_PATH=/usr/local/cuda-12.4/
 cmake -DCUDA_CUDART_LIBRARY=/usr/local/cuda/lib64/libcudart.so ..
 make
 ```
@@ -94,7 +94,7 @@ export CUDA_PATH=/usr/local/cuda-12.4/
 export LD_LIBRARY_PATH=~/gcc-14.1.0/x86_64-linux-gnu/libstdc++-v3/src/.libs:$LD_LIBRARY_PATH
 
 // run from workspace root
-./build/SplatPainter
+./build/SplatEditor
 ```
 
 </details>

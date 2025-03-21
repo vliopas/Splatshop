@@ -634,12 +634,11 @@ void kernel_stageSplats_perspectivecorrect(
 	mat4 view = target.view;
 	mat4 worldView = view * world;
 
-	vec3 splatPos = model.position[splatIndex];
-	vec4 worldPos = world * vec4(splatPos, 1.0f);
+	vec4 splatPos = vec4(model.position[splatIndex], 1.0f);
 	vec4 M3 = -glm::transpose(worldView)[2]; // times -1 because camera looks in negative z direction
 
-	float depth = dot(M3, worldPos);
-	if (depth < 0.2f || depth > 1000.0f) return;
+	float z_view = dot(M3, splatPos);
+	if (z_view < 0.2f || z_view > 1000.0f) return;
 
 	vec4 color = model.color[splatIndex].normalized();
 	if (color.a < MIN_ALPHA_THRESHOLD) return;
@@ -654,27 +653,27 @@ void kernel_stageSplats_perspectivecorrect(
 	mat4 VPM = VP * worldView;
 	mat3 RS = rotation * scale;
 	mat4 T = mat4(RS);
-	T[3] = vec4(splatPos, 1.0f);
+	T[3] = splatPos;
 	mat4 VPMT = glm::transpose(VPM * T);
 
 	// tight cutoff for the used opacity threshold
-    float rho_cutoff = 2.0f * logf(color.a * MIN_ALPHA_THRESHOLD_RCP);
-    vec4 d = vec4(rho_cutoff, rho_cutoff, rho_cutoff, -1.0f);
+	float rho_cutoff = 2.0f * logf(color.a * MIN_ALPHA_THRESHOLD_RCP);
+	vec4 d = vec4(rho_cutoff, rho_cutoff, rho_cutoff, -1.0f);
 	vec4 VPMT4 = VPMT[3];
-    float s = dot(d, VPMT4 * VPMT4);
-    if (s == 0.0f) return;
-    vec4 f = (1.0f / s) * d;
+	float s = dot(d, VPMT4 * VPMT4);
+	if (s == 0.0f) return;
+	vec4 f = (1.0f / s) * d;
 	// start with z-extent in screen-space for exact near/far plane culling
 	vec4 VPMT3 = VPMT[2];
-    float center_z = dot(f, VPMT3 * VPMT4);
-    float extent_z = sqrtf(fmaxf(center_z * center_z - dot(f, VPMT3 * VPMT3), 0.0f));
-    float z_min = center_z - extent_z;
-    float z_max = center_z + extent_z;
-    if (z_min < -1.0f || z_max > 1.0f) return;
-    // now x/y-extent of the screen-space bounding box
+	float center_z = dot(f, VPMT3 * VPMT4);
+	float extent_z = sqrtf(fmaxf(center_z * center_z - dot(f, VPMT3 * VPMT3), 0.0f));
+	float z_min = center_z - extent_z;
+	float z_max = center_z + extent_z;
+	if (z_min < -1.0f || z_max > 1.0f) return;
+	// now x/y-extent of the screen-space bounding box
 	vec4 VPMT1 = VPMT[0];
 	vec4 VPMT2 = VPMT[1];
-    vec2 center = vec2(dot(f, VPMT1 * VPMT4), dot(f, VPMT2 * VPMT4));
+	vec2 center = vec2(dot(f, VPMT1 * VPMT4), dot(f, VPMT2 * VPMT4));
 	vec2 extent = vec2(
 		sqrtf(fmaxf(center.x * center.x - dot(f, VPMT1 * VPMT1), 0.0f)),
 		sqrtf(fmaxf(center.y * center.y - dot(f, VPMT2 * VPMT2), 0.0f))
@@ -687,15 +686,15 @@ void kernel_stageSplats_perspectivecorrect(
 	// compute screen-space bounding box in tile coordinates (+0.5 to account for half-pixel shift in V)
 	int tiles_x = (target.width + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
 	int tiles_y = (target.height + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
-    ivec4 screen_bounds = vec4(
-        min(tiles_x, max(0, __float2int_rd((center.x - extent.x + 0.5f) / TILE_SIZE_PERSPCORRECT))), // x_min (inclusive)
-        min(tiles_y, max(0, __float2int_rd((center.y - extent.y + 0.5f) / TILE_SIZE_PERSPCORRECT))), // y_min (inclusive)
+	ivec4 screen_bounds = vec4(
+		min(tiles_x, max(0, __float2int_rd((center.x - extent.x + 0.5f) / TILE_SIZE_PERSPCORRECT))), // x_min (inclusive)
+		min(tiles_y, max(0, __float2int_rd((center.y - extent.y + 0.5f) / TILE_SIZE_PERSPCORRECT))), // y_min (inclusive)
 		min(tiles_x, max(0, __float2int_ru((center.x + extent.x + 0.5f) / TILE_SIZE_PERSPCORRECT))), // x_max (exclusive)
-        min(tiles_y, max(0, __float2int_ru((center.y + extent.y + 0.5f) / TILE_SIZE_PERSPCORRECT))) // y_max (exclusive)
-    );
+		min(tiles_y, max(0, __float2int_ru((center.y + extent.y + 0.5f) / TILE_SIZE_PERSPCORRECT))) // y_max (exclusive)
+	);
 
-    // compute number of potentially influenced tiles
-    int n_touched_tiles = (screen_bounds.z - screen_bounds.x) * (screen_bounds.w - screen_bounds.y);
+	// compute number of potentially influenced tiles
+	int n_touched_tiles = (screen_bounds.z - screen_bounds.x) * (screen_bounds.w - screen_bounds.y);
 	if (n_touched_tiles == 0) return;
 
 	color = applyColorCorrection(color, colorCorrection);
@@ -748,11 +747,11 @@ void kernel_stageSplats_perspectivecorrect(
 	stuff.VPMT1 = VPMT1;
 	stuff.VPMT2 = VPMT2;
 	stuff.VPMT4 = VPMT4;
-	stuff.MT3 = vec4(dot(M3, T[0]), dot(M3, T[1]), dot(M3, T[2]), dot(M3, T[3]));
+	stuff.MT3 = vec4(dot(M3, T[0]), dot(M3, T[1]), dot(M3, T[2]), z_view);
 	stuff.color = to32BitColor(color);
 	stuff.flags = flags;
 
-	staging_depth[visibleSplatID] = depth;
+	staging_depth[visibleSplatID] = z_view;
 	staging_bounds[visibleSplatID] = glm::i16vec4(screen_bounds);
 	staging_data[visibleSplatID] = stuff;
 
@@ -1421,12 +1420,13 @@ void kernel_render_gaussians_perspectivecorrect(
 				if (numerator_rho2 > MAX_CUTTOFF_SQ * denominator) continue; // considering opacity requires log/sqrt -> slower
 				float denominator_rcp = 1.0f / denominator;
 				float G = expf(-0.5f * numerator_rho2 * denominator_rcp);
-				float alpha = fminf(collected_opacity[j] * G, MAX_FRAGMENT_ALPHA);
+				float opacity = collected_opacity[j];
+				float alpha = fminf(opacity * G, MAX_FRAGMENT_ALPHA);
 				if (alpha < MIN_ALPHA_THRESHOLD) continue;
-				if(args.uniforms.showRing && G < 0.1f){
-					alpha = 1.0f;
-					G += 0.5f;
+				if (args.uniforms.showRing && alpha < 0.1f){
+					alpha += 0.9f;
 				}
+
 				vec3 eval_point_diag = cross(d, m) * denominator_rcp;
 				vec4 MT3 = collected_MT3[j];
 				float depth = dot(vec3(MT3), eval_point_diag) + MT3.w;
