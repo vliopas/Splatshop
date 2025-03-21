@@ -1,0 +1,482 @@
+
+
+void SplatEditor::update(){
+
+	cuCtxSynchronize();
+
+	{
+		string strfps = format("Splat Editor | FPS: {}", int(GLRenderer::fps));
+		glfwSetWindowTitle(GLRenderer::window, strfps.c_str());
+	}
+
+	TWEEN::update();
+
+	auto flip = glm::dmat4(
+		1.0, 0.0, 0.0, 0.0,
+		0.0, 0.0, 1.0, 0.0,
+		0.0, -1.0, 0.0, 0.0,
+		0.0, 0.0, 0.0, 1.0
+	);
+
+	if(GLRenderer::frameCount == 10){
+
+		// position: 39.61407481757166, 244.2266987896179, -82.97171618301215 
+		// Runtime::controls->yaw    = 2.373;
+		// Runtime::controls->pitch  = -0.438;
+		// Runtime::controls->radius = 212.311;
+		// Runtime::controls->target = { -108.045, 106.041, -18.338, };
+
+
+		// if(fs::exists("./defaultscene.splatsy")){
+		// 	SplatsyLoader::load("./defaultscene.splatsy", scene, *Runtime::controls);
+
+		// 	// position: -4.578230079668095, -1.1794757072982893, 2.670841916742692 
+		// 	Runtime::controls->yaw    = -1.325;
+		// 	Runtime::controls->pitch  = -0.330;
+		// 	Runtime::controls->radius = 4.691;
+		// 	Runtime::controls->target = { -0.028, -0.100, 2.301, };
+
+
+		// 	scene.deselectAllNodes();
+		// 	scene.world->children[scene.world->children.size() - 1]->selected = true;
+		// }
+
+		// SplatsyFilesLoader::load("./splatmodels_magicwand_leaves/scene.json", scene, *Runtime::controls);
+		// SplatsyFilesLoader::load("./savefile_ref/scene.json", scene, *Runtime::controls);
+		// SplatsyFilesLoader::load("./splatmodels_lantern/scene.json", scene, *Runtime::controls);
+
+		// {
+		// 	//  string path = "E:/resources/gaussian_splats/garden_aligned.ply";
+		// 	string path = "D:/dev/workspaces/CudaPlayground_gaussian_private/savefile/splats/garden_aligned.ply.ply";
+		// 	auto splats = GSPlyLoader::load(path);
+
+		// 	shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+
+		// 	scene.world->children.push_back(node);
+		// }
+		
+
+		// string file = "E:/resources/meshes/anita_mui.glb";
+		// auto glb = GLBLoader::load(file);
+
+		// for(float x = -10.0f; x <= 10.0f; x += 5.0f)
+		// for(float y = -10.0f; y <= 10.0f; y += 5.0f)
+		// {
+
+		// 	shared_ptr<SNTriangles> node = make_shared<SNTriangles>(file);
+		// 	node->set(glb.positions, glb.uvs);
+		// 	node->setTexture(glb.textureSize, glb.texture->data);
+		// 	node->transform = glm::translate(vec3{x, y, 0.0f });
+
+		// 	scene.world->children.push_back(node);
+
+		// 	Runtime::controls->focus(node->aabb.min, node->aabb.max, 1.0f);
+		// }
+
+		// {
+		// 	auto sphere = Mesh::createSphere();
+
+		// 	for(float x = -50.0f; x < 50.0f; x += 1.0f)
+		// 	for(float y = -50.0f; y < 50.0f; y += 1.0f)
+		// 	{
+		// 		string label = format("sphere_{}_{}", x, y);
+		// 		auto node = make_shared<SNTriangles>(label);
+		// 		node->set(sphere->position, sphere->uv);
+		// 		node->transform = glm::translate(vec3{x, y, 0.0f}) * glm::scale(vec3{0.5f, 0.5f, 0.5f});
+		// 		node->hidden = true;
+
+		// 		scene.world->children.push_back(node);
+		// 	}
+		// }
+		
+
+		// { // ANITA MUI MESH
+		// 	string file = "E:/resources/meshes/anita_mui.glb";
+		// 	auto glb = GLBLoader::load(file);
+
+		// 	shared_ptr<SNTriangles> node = make_shared<SNTriangles>(file);
+		// 	node->set(glb.positions, glb.uvs);
+		// 	node->setTexture(glb.textureSize, glb.texture->data);
+		// 	node->transform = glm::translate(vec3{ 2.0f, 0.0f, 0.0f });
+
+		// 	scene.world->children.push_back(node);
+
+		// 	Runtime::controls->focus(node->aabb.min, node->aabb.max, 1.0f);
+		// }
+
+		// {
+		// 	int i = 0; 
+		// 	int j = 0;
+		// 	for(int i = -1; i <= 1; i++)
+		// 	for(int j = -1; j <= 1; j++)
+		// 	{
+		// 		string path = "E:/resources/gaussian_splats/garden_aligned.ply";
+		// 		auto splats = GSPlyLoader::load(path);
+
+		// 		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+		// 		node->transform = translate(vec3{30.0f * i, 30.0f * j, 0.0f});
+
+		// 		scene.world->children.push_back(node);
+
+		// 	}
+
+		// 	// position: -4.381387520411223, -0.3112749498473144, 1.1828261580373054 
+		// 	Runtime::controls->yaw    = -14.060;
+		// 	Runtime::controls->pitch  = -0.464;
+		// 	Runtime::controls->radius = 4.297;
+		// 	Runtime::controls->target = { -0.097, -0.017, 1.036, };
+		// }
+
+		// {
+			
+		// 	string path = "E:/resources/gaussian_splats/flowervase.ply";
+		// 	auto splats = GSPlyLoader::load(path);
+
+		// 	shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+
+		// 	scene.world->children.push_back(node);
+
+		// 	// position: -1.2809205867970963, -0.3081981468195276, 0.16157945899611048 
+		// 	Runtime::controls->yaw    = -13.925;
+		// 	Runtime::controls->pitch  = -0.327;
+		// 	Runtime::controls->radius = 1.369;
+		// 	Runtime::controls->target = { 0.058, -0.036, 0.069, };
+
+		// }
+
+	}
+
+	// if(GLRenderer::frameCount % 500 == 0){
+	// 	CURuntime::print();
+	// }
+
+	// FIXME: In vr we reroute mouse inputs, and because of that we somehow need to deffer this to after the rerouting.
+	// In Desktop mode, we begin here because we need to begin the frame before drawing the gizmo.
+	// if(!ovr->isActive())
+	//ImGui::SetCurrentContext(imguicontext_desktop);
+	ImGui::NewFrame();
+	ImGuizmo::BeginFrame();
+	Runtime::timings.newFrame();
+
+	scene.updateTransformations();
+	Runtime::debugValues.clear();
+	Runtime::debugValueList.clear();
+	Runtime::numVisibleSplats = 0;
+	Runtime::numVisibleFragments = 0;
+	Runtime::numRenderedTriangles = 0;
+	*h_numLines = 0;
+	triangleQueue.clear();
+
+	if(settings.showBoundingBoxes){
+		scene.process<SNSplats>([&](SNSplats* node) {
+			if(!node->visible) return;
+			if(node->hidden) return;
+			drawBox(node->aabb);
+		});
+	}
+
+	if(settings.showAxes)
+	{ // DRAW AXIS
+		Line x = {
+			.start = {0.0f, 0.0f, 0.0f}, 
+			.end = {10.0f, 0.0f, 0.0f},
+			.color = 0xff0000ff
+		};
+		Line y = {
+			.start = {0.0f, 0.0f, 0.0f}, 
+			.end = {0.0f, 10.0f, 0.0f},
+			.color = 0xff00ff00
+		};
+		Line z = {
+			.start = {0.0f, 0.0f, 0.0f}, 
+			.end = {00.0f, 0.0f, 5.0f},
+			.color = 0xffff0000
+		};
+
+		h_lines[*h_numLines + 0] = x;
+		h_lines[*h_numLines + 1] = y;
+		h_lines[*h_numLines + 2] = z;
+		*h_numLines = *h_numLines + 3;
+	}
+
+	// {
+	// 	Box3 aabb = getSelectionAABB();
+
+	// 	drawBox(aabb, 0xff0000ff);
+	// }
+
+	if(settings.showGrid)
+	{ // DRAW GRID
+		for(float i = -10.0f; i <= 10.0f; i += 1.0f){
+			Line lx = {
+				.start = {i, -10.0f, 0.0f}, 
+				.end = {i, 10.0f, 0.0f},
+				.color = 0xff666666
+			};
+			Line ly = {
+				.start = {-10.0f, i, 0.0f}, 
+				.end = {10.0f, i, 0.0f},
+				.color = 0xff666666
+			};
+
+			if(settings.showAxes)
+			if(i == 0.0f)
+			{
+				lx.end.y = 0.0f;
+				ly.end.x = 0.0f;
+			}
+
+			// queue_lines.push_back(lx);
+			// queue_lines.push_back(ly);
+
+			h_lines[*h_numLines + 0] = lx;
+			h_lines[*h_numLines + 1] = ly;
+			*h_numLines = *h_numLines + 2;
+		}
+	}
+
+
+	if(GLRenderer::width * GLRenderer::height == 0){
+		return;
+	}
+
+	CudaModularProgram::measureTimings = Runtime::measureTimings;
+
+	launchArgs = getCommonLaunchArgs();
+
+	static CUdeviceptr cptr_view = 0;
+	if(cptr_view == 0){
+		cptr_view = CURuntime::alloc("view", sizeof(mat4));
+	}
+
+	cuMemsetD32Async(cptr_state + offsetof(DeviceState, visibleSplats), 0, 1, mainstream);
+	cuMemsetD32Async(cptr_state + offsetof(DeviceState, visibleSplatFragments), 0, 1, mainstream);
+	// cuMemsetD32Async(cptr_state + offsetof(DeviceState, numSelectedSplats), 0, 1, mainstream);
+	cuMemsetD32Async(cptr_state + offsetof(DeviceState, numSplatsInLargestTile), 0, 1, mainstream);
+	cuMemsetD32Async(cptr_state + offsetof(DeviceState, dbg.numAccepted), 0, 1, mainstream);
+	cuMemsetD32Async(cptr_state + offsetof(DeviceState, dbg.numRejected), 0, 1, mainstream);
+	cuMemsetD32Async(cptr_numLines, 0, 1, mainstream);
+
+	if(tempSplats)
+	{ // UPDATE POSITION OF DRAGED FILE
+		vec3 pos = deviceState.hovered_pos;
+		if (pos.x == Infinity || pos.y == Infinity || pos.z == Infinity) {
+			pos = { 0.0f, 0.0f, 0.0f };
+		}
+		if (pos.x == -Infinity || pos.y == -Infinity || pos.z == -Infinity) {
+			pos = { 0.0f, 0.0f, 0.0f };
+		}
+
+		tempSplats->transform = glm::translate(pos);
+	}
+
+	// upload newly loaded splats
+	scene.forEach<SNSplats>([&](SNSplats* node) {
+		uploadSplats(node);
+	});
+	for(auto node : AssetLibrary::assets){
+		onTypeMatch<SNSplats>(node, [&](shared_ptr<SNSplats> node){
+			uploadSplats((SNSplats*)node.get());
+		});
+	}
+
+	// upload newly loaded points
+	scene.forEach<SNPoints>([&](SNPoints* node) {
+
+		auto points = node->points;
+
+		uint64_t numLoaded = points->numPointsLoaded;
+		node->manager.commit(numLoaded);
+		PointData& pd = node->manager.data;
+
+		int numUploaded = pd.numUploaded;
+		int numToUpload = numLoaded - numUploaded;
+
+		if(numToUpload > 0){
+			CURuntime::check(cuMemcpyHtoDAsync((CUdeviceptr)pd.position   + 12llu * numUploaded, points->position->ptr + 12llu * numUploaded , 12llu * numToUpload, mainstream));
+			CURuntime::check(cuMemcpyHtoDAsync((CUdeviceptr)pd.color      +  4llu * numUploaded, points->color->ptr    +  4llu * numUploaded ,  4llu * numToUpload, mainstream));
+			CURuntime::check(cuMemsetD32Async((CUdeviceptr)pd.flags + numUploaded, 0, numToUpload, mainstream));
+
+			pd.count += numToUpload;
+			pd.numUploaded += numToUpload;
+		}
+	});
+
+	
+
+	launchArgs = getCommonLaunchArgs();
+
+	glm::mat4 scale = glm::scale(glm::vec3(0.3f, 0.3f, 0.3f));
+	glm::mat4 trans = glm::translate(glm::vec3(0.0f, 0.0f, 1.5f));
+	viewmodeImmersiveVR.world_vr = trans * scale;
+
+	if(ovr->isActive()){
+		ovr->updatePose(viewmode == VIEWMODE_IMMERSIVE_VR);
+
+		ovr->processEvents();
+
+		int leftHandID = ovr->system->GetTrackedDeviceIndexForControllerRole(vr::ETrackedControllerRole::TrackedControllerRole_LeftHand);
+		int rightHandID = ovr->system->GetTrackedDeviceIndexForControllerRole(vr::ETrackedControllerRole::TrackedControllerRole_RightHand);
+
+		if (leftHandID >= 0) {
+			auto [model, texture] = ovr->getRenderModel(leftHandID);
+
+			if (model) {
+				
+				static shared_ptr<SNTriangles> node = nullptr;
+
+				if(!node){
+					node = ovrToNode("controller_left", model, texture);
+					node->hidden = true;
+					scene.vr->children.push_back(node);
+				}else{
+					Pose poseLeft = ovr->getLeftControllerPose();
+
+					float aspect = float(GLRenderer::width) / float(GLRenderer::height);
+
+					node->transform = flip * poseLeft.transform;
+
+					auto state = ovr->getLeftControllerState();
+					if(poseLeft.valid){
+						bool menuButtonPressed = (state.ulButtonPressed & (1 << vr::EVRButtonId::k_EButton_ApplicationMenu));
+
+						// if(menuButtonPressed)
+						{
+							auto page = vrPages[currentVrPage];
+
+							float sx = float(page.width) / 1000.0f;
+							float sy = float(page.height) / 1000.0f;
+
+							mat4 mRot = glm::rotate(-3.1415f * 0.5f, vec3{ 1.0f, 0.0f, 0.0f });
+							mat4 mScale = glm::scale(vec3{sx, sy, 1.0f} * 0.2f);
+
+							// sn_vr_editing->transform = mat4(flip * poseLeft.transform) * mRot * mScale;
+							sn_vr_editing->visible = true;
+						}
+
+					}
+
+					// { // DEBUG
+					// 	auto mesh = ovrToMesh(model, texture);
+
+					// 	node->set(mesh.position, mesh.uv);
+					// }
+				}
+			}
+		}
+		if (rightHandID >= 0) {
+			auto [model, texture] = ovr->getRenderModel(rightHandID);
+
+			if (model) {
+
+				static shared_ptr<SNTriangles> node = nullptr;
+
+				if(!node){
+					node = ovrToNode("controller_right", model, texture);
+					node->hidden = true;
+					scene.vr->children.push_back(node);
+				}else{
+					Pose pose = ovr->getRightControllerPose();
+					node->transform = flip * pose.transform;
+				}
+			}
+		}
+		
+
+		if(viewmode == VIEWMODE_IMMERSIVE_VR){
+			auto size = ovr->getRecommmendedRenderTargetSize();	
+			int width = size[0];
+			int height = size[1];
+
+			bool needsResizeX = viewLeft.framebuffer->width != width;
+			bool needsResizeY = viewLeft.framebuffer->height != height;
+			bool needsResize = needsResizeX || needsResizeY;
+
+			// viewLeft.framebuffer->setSize(width, height);
+			// viewRight.framebuffer->setSize(width, height);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
+			glViewport(0, 0, width, height);
+			glClearColor(1.0, 0.0, 0.0, 1.0);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, viewRight.framebuffer->handle);
+			glViewport(0, 0, width, height);
+			glClearColor(0.0, 1.0, 0.0, 1.0);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+			auto poseHMD = ovr->getHmdPose();
+			auto poseLeft = ovr->getEyePose(vr::Hmd_Eye::Eye_Left);
+			auto poseRight = ovr->getEyePose(vr::Hmd_Eye::Eye_Right);
+
+			viewLeft.view = glm::inverse(flip * poseHMD * poseLeft);
+			viewLeft.proj = ovr->getProjection(vr::Hmd_Eye::Eye_Left, 0.01, 10'000.0);
+			viewLeft.VP = ovr->getProjectionVP(vr::Hmd_Eye::Eye_Left, 0.2, 1'000.0, width, height);
+
+			viewRight.view = glm::inverse(flip * poseHMD * poseRight);
+			viewRight.proj = ovr->getProjection(vr::Hmd_Eye::Eye_Right, 0.2, 1'000.0);
+			viewRight.VP = ovr->getProjectionVP(vr::Hmd_Eye::Eye_Right, 0.2, 1'000.0, width, height);
+		}
+
+		auto state = ovr->getRightControllerState();
+		// if(state.ulButtonPressed == 2){
+		// 	Pose pose_left = ovr->getLeftControllerPose();
+		// 	Pose pose_right = ovr->getRightControllerPose();
+			
+		// 	viewmodeDesktopVr.m_controller_neutral_left = pose_left.transform;
+		// 	viewmodeDesktopVr.m_controller_neutral_right = pose_right.transform;
+
+		// 	glm::mat4 avg;
+		// 	float* f_avg = (float*)&avg;
+		// 	double* f_left = (double*)&pose_left.transform;
+		// 	double* f_right = (double*)&pose_right.transform;
+
+		// 	for(int i = 0; i < 16; i++){
+		// 		f_avg[i] = (f_left[i] + f_right[i]) / 2.0;
+		// 	}
+
+		// 	viewmodeDesktopVr.m_controller_neutral = avg;
+		// }
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	}
+
+	scene.updateTransformations();
+
+	inputHandling();
+
+	scene.updateTransformations();
+
+	scene.process<SNSplats>([&](SNSplats* node){
+		if(!node->visible) return;
+		
+		GaussianData model = node->dmng.data;
+
+		if(node->hovered){
+			updateBoundingBox(node);
+			drawBox(node->aabb, 0xff00ff00);
+		}
+	});
+
+	if(ovr->isActive()){
+		SceneNode* sn_vr_controller_right = scene.find("controller_right");
+
+		// DRAW LINE FOR RIGHT CONTROLLER
+		if(sn_vr_controller_right){
+			if(state_vr.menu_intersects){
+				mat4 mRot = glm::rotate(-140.0f * 3.1415f / 180.0f, vec3{ 1.0f, 0.0f, 0.0f });
+				mat4 transform = sn_vr_controller_right->transform * mRot;
+				vec3 origin = vec3(transform * vec4{0.0f, 0.0f, 0.0f, 1.0f});
+
+				h_lines[*h_numLines] = Line{.start = origin, .end = state_vr.menu_intersection, .color = 0x0000ff00,};
+				*h_numLines = *h_numLines + 1;
+			}
+		}
+		}
+
+	// start asynchronously sending host-queued lines to device
+	virt_lines_host->commit(*h_numLines * sizeof(Line));
+	cuMemcpyHtoDAsync(virt_lines_host->cptr, h_lines, *h_numLines * sizeof(Line), mainstream);
+	cuMemsetD32Async(cptr_numLines_host, *h_numLines, 1, mainstream);
+	
+};
