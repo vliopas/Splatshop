@@ -182,7 +182,7 @@ export LD_LIBRARY_PATH=~/gcc-14.1.0/x86_64-linux-gnu/libstdc++-v3/src/.libs:$LD_
 
 1. Drag&Drop ply file
 2. Select region of interest with spherical selection tool. 
-3. Invert selection and delete (key: t).
+3. Invert selection and delete (key: del).
 4. Rotate until model aligns with ground plane (key: r) and translate to origin (key: t). If the ground is sufficiently densely reconstructed, you can also try using the 3-point-alignment tool, which aligns the model by specifying three points on the ground. 
 5. Remove undesired splats with a combination of circular and spherical selection and deletion tools. To retain a nice circular ground, select splats with a spherical brush
 6. Then select the remainder of the splats that should remain. Invert selection and delete.
