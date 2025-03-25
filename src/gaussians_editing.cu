@@ -631,7 +631,7 @@ void kernel_select_vr(
 	float brushRadius = 0.1f;
 
 	
-	if(intersectionMode = BRUSH_INTERSECTION_CENTER){
+	if(intersectionMode == BRUSH_INTERSECTION_CENTER){
 
 		vec3 pos = model.position[index];
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
@@ -652,7 +652,7 @@ void kernel_select_vr(
 			newFlags = newFlags & (~0b1001);
 		}
 
-	}else if(intersectionMode = BRUSH_INTERSECTION_BORDER){
+	}else if(intersectionMode == BRUSH_INTERSECTION_BORDER){
 
 		vec3 pos = model.position[index];
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));

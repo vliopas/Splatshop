@@ -11,8 +11,6 @@
 #define GLM_FORCE_CUDA
 #define CUDA_VERSION 12000
 
-#define USE_LAMBDA_FOR_TOUCHED_TILE_ITERATION
-
 namespace std{
 	using size_t = ::size_t;
 };
@@ -397,8 +395,6 @@ void kernel_stageSplats(
 		if(eigenValue2 < 0.105f) return;
 	}
 
-	
-
 	vec2 eigenVector1 = normalize(vec2(b, eigenValue1 - a));
 	vec2 eigenVector2 = vec2(eigenVector1.y, -eigenVector1.x);
 
@@ -423,7 +419,6 @@ void kernel_stageSplats(
 	{
 		if(color.a < 0.2f) return;
 	}
-
 
 	float depth = ndc.w;
 	vec2 _pixelCoord = {
@@ -496,8 +491,6 @@ void kernel_stageSplats(
 			color.g = min(color.g * 0.5f + 0.1f, 1.0f);
 			color.b = min(color.b * 2.0f + 0.4f, 1.0f);
 		}
-
-		// if(!isHighlighted && !isSelected) return;
 	}
 
 	if(!model.writeDepth){
@@ -505,8 +498,6 @@ void kernel_stageSplats(
 	}
 
 	if((flags & FLAGS_DELETED) != 0) return;
-
-	// printf("%d \n", splatIndex);
 
 	// TODO: check if its more efficient to run a separate kernel that 
 	// initializes <numVisibleSplats> elements with ordering[index] = index;
@@ -520,76 +511,18 @@ void kernel_stageSplats(
 	
 	encode_stagedata(stuff, _basisVector1, _basisVector2, depth);
 
-
 	staging_depth[visibleSplatID] = depth;
-	// int idepth = 10000.0f * log2f(depth + 1.0f);
-	// staging_depth[visibleSplatID] = float(idepth);
 	staging_data[visibleSplatID] = stuff;
 
-	// DEBUG: check size of bool array. Result: actually 1 byte per bool.
-	// bool* test = (bool*)staging_data;
-	// if(grid.thread_rank() == 0){
-
-	// 	uint64_t p0 = uint64_t(&test[0]);
-	// 	uint64_t p1 = uint64_t(&test[16]);
-	// 	uint64_t diff = p1 - p0;
-
-	// 	printf("%d \n", int(diff));
-	// 	// printf("%d \n", sizeof(test[0]));
-	// }
-
-
 	// Count tile fragments that each splat produces
+	uint32_t tileFrags = 0;
 
-	#if defined(USE_LAMBDA_FOR_TOUCHED_TILE_ITERATION)
-		uint32_t tileFrags = 0;
+	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+		tileFrags++;
+	});
 
-		forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
-			tileFrags++;
-		});
-
-		numTilefragments_splatwise[visibleSplatID] = tileFrags;
-		atomicAdd(numTilefragments, tileFrags);
-	#else
-		{
-		int tileFrags = 0;
-
-		// float diag = sqrt(16.0f * 16.0f + 16.0f * 16.0f);
-		float diag = 22.627416997969522f;
-		float a = length(basisVector1);
-		float b = length(basisVector2);
-		float a_outer = (a + diag / 2);
-		float b_outer = (b + diag / 2);
-
-		for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
-		for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
-		{
-
-			bool intersectsTile = true;
-			{
-				float px = tile_x * 16.0f + 8.0f;
-				float py = tile_y * 16.0f + 8.0f;
-
-				vec2 pFrag = vec2{px, py} - pixelCoord;
-				float sT = dot(normalize(basisVector1), pFrag) / a_outer;
-				float sB = dot(normalize(basisVector2), pFrag) / b_outer;
-
-				float w = sqrt(sT * sT + sB * sB);
-
-				intersectsTile = w < 1.0f;
-			}
-
-			if(intersectsTile){
-				tileFrags++;
-			}
-		}
-
-		numTilefragments_splatwise[visibleSplatID] = tileFrags;
-		atomicAdd(numTilefragments, tileFrags);
-		}
-	#endif
-	
-
+	numTilefragments_splatwise[visibleSplatID] = tileFrags;
+	atomicAdd(numTilefragments, tileFrags);
 }
 
 inline constexpr int K = 16;
@@ -850,53 +783,15 @@ void kernel_createTilefragmentArray(
 
 	uint32_t fragmentOffset = prefixsum[index];
 
+	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+		uint32_t tileID = tile_x + tile_y * tiles_x;
 
-	#if defined(USE_LAMBDA_FOR_TOUCHED_TILE_ITERATION)
-		forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
-			uint32_t tileID = tile_x + tile_y * tiles_x;
+		tileIDs[fragmentOffset] = tileID;
+		splatIDs[fragmentOffset] = order;
 
-			tileIDs[fragmentOffset] = tileID;
-			splatIDs[fragmentOffset] = order;
-
-			fragmentOffset++;
-		});
-	#else
-		// Create the tile fragments that each splat produces
-		// float diag = sqrt(16.0f * 16.0f + 16.0f * 16.0f);
-		float diag = 22.627416997969522f;
-		float a = length(basisVector1);
-		float b = length(basisVector2);
-		float a_outer = (a + diag / 2);
-		float b_outer = (b + diag / 2);
-
-		for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
-		for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
-		{
-
-			bool intersectsTile = true;
-			{
-				float px = tile_x * 16.0f + 8.0f;
-				float py = tile_y * 16.0f + 8.0f;
-
-				vec2 pFrag = vec2{px, py} - pixelCoord;
-				float sT = dot(normalize(basisVector1), pFrag) / a_outer;
-				float sB = dot(normalize(basisVector2), pFrag) / b_outer;
-
-				float w = sqrt(sT * sT + sB * sB);
-
-				intersectsTile = w < 1.0f;
-			}
-
-			if(intersectsTile){
-				uint32_t tileID = tile_x + tile_y * tiles_x;
-
-				tileIDs[fragmentOffset] = tileID;
-				splatIDs[fragmentOffset] = order;
-
-				fragmentOffset++;
-			}
-		}
-	#endif
+		fragmentOffset++;
+	});
+	
 }
 
 extern "C" __global__

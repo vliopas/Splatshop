@@ -28,6 +28,120 @@ struct ConcurrentTarget{
 	uint32_t numFragments;
 };
 
+void dump_tile(ConcurrentTarget& target, uint32_t numTiles){
+
+	auto editor = SplatEditor::instance;
+
+	int width     = target.target.width;
+	int height    = target.target.height;
+	int numPixels = width * height;
+	int tiles_x   = int(width + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
+	int tiles_y   = int(height + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
+
+	vector<Tile> tiles(numTiles);
+	cuMemcpyDtoH(tiles.data(), target.cptr_tiles, sizeof(Tile) * numTiles);
+
+	stringstream ss;
+	ss << format("numTiles: {}\n", numTiles);
+
+	// Tile largestTile;
+	// int largestTileID = 0;
+	// int splatsInLargest = 0;
+	// for(int tileID = 0; tileID < numTiles; tileID++){
+	// 	int numSplats = tiles[tileID].lastIndex - tiles[tileID].firstIndex;
+	// 	if(numSplats > splatsInLargest){
+	// 		largestTileID = tileID;
+	// 		splatsInLargest = numSplats;
+	// 		largestTile = tiles[tileID];
+	// 	}
+	// }
+
+	
+
+	// ss << format("largest tile: {}, splats: {} \n", largestTileID, splatsInLargest);
+
+	auto dumpTile = [&](string label, int tile_x, int tile_y){
+		Tile debugTile = tiles[tile_x + tile_y * tiles_x];
+
+		int numSplats = debugTile.lastIndex - debugTile.firstIndex + 1;
+		vector<StageData> stagedatas(target.virt_stagedata->comitted / sizeof(StageData));
+		vector<uint32_t> splatIndices(target.virt_indices->comitted / 4);
+		vector<float> depths(target.virt_depth->comitted / 4);
+		vector<uint32_t> ordering(target.virt_ordering_splatdepth->comitted / 4);
+
+		cuMemcpyDtoH(stagedatas.data(), target.virt_stagedata->cptr, target.virt_stagedata->comitted);
+		cuMemcpyDtoH(splatIndices.data(), target.virt_indices->cptr, target.virt_indices->comitted);
+		cuMemcpyDtoH(depths.data(), target.virt_depth->cptr, target.virt_depth->comitted);
+		cuMemcpyDtoH(ordering.data(), target.virt_ordering_splatdepth->cptr, target.virt_ordering_splatdepth->comitted);
+
+		stringstream ssPointcloud;
+
+		auto decode_basisvector_i16vec2 = [](glm::i16vec2 encoded) -> vec2 {
+			constexpr float basisvector_encoding_factor = 20.0f;
+
+			float length = float(encoded.y) / basisvector_encoding_factor;
+			float angle = float(encoded.x) / 10'000.0f;
+
+			float x = cos(angle);
+			float y = sin(angle);
+
+			return vec2{x, y} * length;
+		};
+
+		for(int i = 0; i < numSplats; i++){
+			int splatIndex = splatIndices[debugTile.firstIndex + i];
+			StageData stagedata = stagedatas[splatIndex];
+			// float depth = depths[ordering[splatIndex]];
+			// float depth = stagedata.depth;
+			float depth = 16.0f * float(i) / float(numSplats);
+
+			vec2 imgpos = vec2(stagedata.imgPos_encoded) / 10.0f;
+			uint8_t* rgba = (uint8_t*)&stagedata.color;
+
+			float x = imgpos.x;
+			float y = imgpos.y;
+			float z = depth;
+
+			vec2 basisvector1 = decode_basisvector_i16vec2(stagedata.basisvector1_encoded);
+			vec2 basisvector2 = decode_basisvector_i16vec2(stagedata.basisvector2_encoded);
+
+			ssPointcloud << format("{:.3f}, {:.3f}, {:.3f}, {}, {}, {}, {}, {}, {}, {}, {}\n", 
+				x, y, z, 
+				rgba[0], rgba[1], rgba[2], rgba[3],
+				basisvector1.x, basisvector1.y,
+				basisvector2.x, basisvector2.y
+				);
+		}
+
+		string filename = format("dump_{}_tile_{}_{}.csv", label, tile_x, tile_y);
+		writeFile(filename.c_str(), ssPointcloud.str());
+	};
+
+	for(int tx = -1; tx <= 1; tx++)
+	for(int ty = -1; ty <= 1; ty++)
+	{
+		dumpTile("garden", 60 + tx, 50 + ty);
+	}
+	
+
+
+	for(int tileID = 0; tileID < numTiles; tileID++){
+		Tile tile = tiles[tileID];
+		int tile_x = tileID % tiles_x;
+		int tile_y = tileID / tiles_x;
+
+		ss << format("Tile {:3} / {:3}, first: {:8}, last: {:8}, count: {:6}\n", 
+			tile_x, tile_y,
+			tile.firstIndex, tile.lastIndex, tile.lastIndex - tile.firstIndex
+		);
+	}
+
+	writeFile("./dump.txt", ss.str());
+
+
+	editor->settings.requestDebugDump = false;
+}
+
 
 void drawsplats_perspectiveCorrect_concurrent(
 	Scene* scene, 
@@ -238,120 +352,6 @@ void drawsplats_perspectiveCorrect_concurrent(
 		cuStreamWaitEvent(target.mainstream, target.cu_tilesComputed, 0);
 		cuStreamWaitEvent(target.sidestream, target.cu_tilesComputed, 0);
 
-		if(editor->settings.requestDebugDump)
-		{ // load stuff and save to file
-
-			int width     = target.target.width;
-			int height    = target.target.height;
-			int numPixels = width * height;
-			int tiles_x   = int(width + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
-			int tiles_y   = int(height + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
-
-			vector<Tile> tiles(numTiles);
-			cuMemcpyDtoH(tiles.data(), target.cptr_tiles, sizeof(Tile) * numTiles);
-
-			stringstream ss;
-			ss << format("numTiles: {}\n", numTiles);
-
-			// Tile largestTile;
-			// int largestTileID = 0;
-			// int splatsInLargest = 0;
-			// for(int tileID = 0; tileID < numTiles; tileID++){
-			// 	int numSplats = tiles[tileID].lastIndex - tiles[tileID].firstIndex;
-			// 	if(numSplats > splatsInLargest){
-			// 		largestTileID = tileID;
-			// 		splatsInLargest = numSplats;
-			// 		largestTile = tiles[tileID];
-			// 	}
-			// }
-
-			
-
-			// ss << format("largest tile: {}, splats: {} \n", largestTileID, splatsInLargest);
-
-			auto dumpTile = [&](string label, int tile_x, int tile_y){
-				Tile debugTile = tiles[tile_x + tile_y * tiles_x];
-
-				int numSplats = debugTile.lastIndex - debugTile.firstIndex + 1;
-				vector<StageData> stagedatas(target.virt_stagedata->comitted / sizeof(StageData));
-				vector<uint32_t> splatIndices(target.virt_indices->comitted / 4);
-				vector<float> depths(target.virt_depth->comitted / 4);
-				vector<uint32_t> ordering(target.virt_ordering_splatdepth->comitted / 4);
-
-				cuMemcpyDtoH(stagedatas.data(), target.virt_stagedata->cptr, target.virt_stagedata->comitted);
-				cuMemcpyDtoH(splatIndices.data(), target.virt_indices->cptr, target.virt_indices->comitted);
-				cuMemcpyDtoH(depths.data(), target.virt_depth->cptr, target.virt_depth->comitted);
-				cuMemcpyDtoH(ordering.data(), target.virt_ordering_splatdepth->cptr, target.virt_ordering_splatdepth->comitted);
-
-				stringstream ssPointcloud;
-
-				auto decode_basisvector_i16vec2 = [](glm::i16vec2 encoded) -> vec2 {
-					constexpr float basisvector_encoding_factor = 20.0f;
-
-					float length = float(encoded.y) / basisvector_encoding_factor;
-					float angle = float(encoded.x) / 10'000.0f;
-
-					float x = cos(angle);
-					float y = sin(angle);
-
-					return vec2{x, y} * length;
-				};
-
-				for(int i = 0; i < numSplats; i++){
-					int splatIndex = splatIndices[debugTile.firstIndex + i];
-					StageData stagedata = stagedatas[splatIndex];
-					// float depth = depths[ordering[splatIndex]];
-					// float depth = stagedata.depth;
-					float depth = 16.0f * float(i) / float(numSplats);
-
-					vec2 imgpos = vec2(stagedata.imgPos_encoded) / 10.0f;
-					uint8_t* rgba = (uint8_t*)&stagedata.color;
-
-					float x = imgpos.x;
-					float y = imgpos.y;
-					float z = depth;
-
-					vec2 basisvector1 = decode_basisvector_i16vec2(stagedata.basisvector1_encoded);
-					vec2 basisvector2 = decode_basisvector_i16vec2(stagedata.basisvector2_encoded);
-
-					ssPointcloud << format("{:.3f}, {:.3f}, {:.3f}, {}, {}, {}, {}, {}, {}, {}, {}\n", 
-						x, y, z, 
-						rgba[0], rgba[1], rgba[2], rgba[3],
-						basisvector1.x, basisvector1.y,
-						basisvector2.x, basisvector2.y
-						);
-				}
-
-				string filename = format("dump_{}_tile_{}_{}.csv", label, tile_x, tile_y);
-				writeFile(filename.c_str(), ssPointcloud.str());
-			};
-
-			for(int tx = -1; tx <= 1; tx++)
-			for(int ty = -1; ty <= 1; ty++)
-			{
-				dumpTile("garden", 60 + tx, 50 + ty);
-			}
-			
-
-
-			for(int tileID = 0; tileID < numTiles; tileID++){
-				Tile tile = tiles[tileID];
-				int tile_x = tileID % tiles_x;
-				int tile_y = tileID / tiles_x;
-
-				ss << format("Tile {:3} / {:3}, first: {:8}, last: {:8}, count: {:6}\n", 
-					tile_x, tile_y,
-					tile.firstIndex, tile.lastIndex, tile.lastIndex - tile.firstIndex
-				);
-			}
-
-			writeFile("./dump.txt", ss.str());
-
-
-			editor->settings.requestDebugDump = false;
-		};
-
-
 		if(target.numFragments > 0){
 
 			void* args_rendering[] = {
@@ -523,28 +523,6 @@ void drawsplats_3dgs_concurrent(
 		GPUPrefixSumsCS::dispatch(target.numVisibleSplats, target.virt_numTilefragments_splatwise_ordered->cptr, target.mainstream);
 	}
 
-	// for(auto target : targets){
-	// 	// The prefix sum is stored in-place in cptr_numTilefragments_ordered
-	// 	CUdeviceptr cptr_prefixsum = target.virt_numTilefragments_splatwise_ordered->cptr;
-
-	// 	// now create the tile fragment (StageData) array
-	// 	void* argsCreatefragmentArray[] = {
-	// 		// input
-	// 		&editor->launchArgs, &target,
-	// 		&target.virt_ordering_splatdepth->cptr, &target.numVisibleSplats, &target.virt_stagedata->cptr, 
-	// 		&cptr_prefixsum,& target.cptr_numFragments,
-	// 		// output
-	// 		&target.virt_tileIDs->cptr, &target.virt_indices->cptr,
-	// 	};
-
-	// 	// Lot's of syncs - without them the 16bit sorting crashed upon loadig large splat models
-	// 	// cuCtxSynchronize();
-	// 	editor->prog_gaussians_rendering->launch("kernel_createTilefragmentArray", argsCreatefragmentArray, target.numVisibleSplats, target.mainstream);
-	// 	// cuCtxSynchronize();
-	// 	GPUSorting::sort_16bitkey_32bitvalue(target.numFragments, target.virt_tileIDs->cptr, target.virt_indices->cptr, target.mainstream);
-	// 	// cuCtxSynchronize();
-	// }
-
 	// Create tile fragment arrays concurrently
 	for(auto target : targets){
 		// The prefix sum is stored in-place in cptr_numTilefragments_ordered
@@ -560,8 +538,6 @@ void drawsplats_3dgs_concurrent(
 			&target.virt_tileIDs->cptr, &target.virt_indices->cptr,
 		};
 
-		// Lot's of syncs - without them the 16bit sorting crashed upon loadig large splat models
-		// cuCtxSynchronize();
 		editor->prog_gaussians_rendering->launch("kernel_createTilefragmentArray", argsCreatefragmentArray, target.numVisibleSplats, target.mainstream);
 	}
 
@@ -595,119 +571,9 @@ void drawsplats_3dgs_concurrent(
 		cuStreamWaitEvent(target.mainstream, target.cu_tilesComputed, 0);
 		cuStreamWaitEvent(target.sidestream, target.cu_tilesComputed, 0);
 
-		if(editor->settings.requestDebugDump)
-		{ // load stuff and save to file
-
-			int width     = target.target.width;
-			int height    = target.target.height;
-			int numPixels = width * height;
-			int tiles_x   = int(width + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
-			int tiles_y   = int(height + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
-
-			vector<Tile> tiles(numTiles);
-			cuMemcpyDtoH(tiles.data(), target.cptr_tiles, sizeof(Tile) * numTiles);
-
-			stringstream ss;
-			ss << format("numTiles: {}\n", numTiles);
-
-			// Tile largestTile;
-			// int largestTileID = 0;
-			// int splatsInLargest = 0;
-			// for(int tileID = 0; tileID < numTiles; tileID++){
-			// 	int numSplats = tiles[tileID].lastIndex - tiles[tileID].firstIndex;
-			// 	if(numSplats > splatsInLargest){
-			// 		largestTileID = tileID;
-			// 		splatsInLargest = numSplats;
-			// 		largestTile = tiles[tileID];
-			// 	}
-			// }
-
-			
-
-			// ss << format("largest tile: {}, splats: {} \n", largestTileID, splatsInLargest);
-
-			auto dumpTile = [&](string label, int tile_x, int tile_y){
-				Tile debugTile = tiles[tile_x + tile_y * tiles_x];
-
-				int numSplats = debugTile.lastIndex - debugTile.firstIndex + 1;
-				vector<StageData> stagedatas(target.virt_stagedata->comitted / sizeof(StageData));
-				vector<uint32_t> splatIndices(target.virt_indices->comitted / 4);
-				vector<float> depths(target.virt_depth->comitted / 4);
-				vector<uint32_t> ordering(target.virt_ordering_splatdepth->comitted / 4);
-
-				cuMemcpyDtoH(stagedatas.data(), target.virt_stagedata->cptr, target.virt_stagedata->comitted);
-				cuMemcpyDtoH(splatIndices.data(), target.virt_indices->cptr, target.virt_indices->comitted);
-				cuMemcpyDtoH(depths.data(), target.virt_depth->cptr, target.virt_depth->comitted);
-				cuMemcpyDtoH(ordering.data(), target.virt_ordering_splatdepth->cptr, target.virt_ordering_splatdepth->comitted);
-
-				stringstream ssPointcloud;
-
-				auto decode_basisvector_i16vec2 = [](glm::i16vec2 encoded) -> vec2 {
-					constexpr float basisvector_encoding_factor = 20.0f;
-
-					float length = float(encoded.y) / basisvector_encoding_factor;
-					float angle = float(encoded.x) / 10'000.0f;
-
-					float x = cos(angle);
-					float y = sin(angle);
-
-					return vec2{x, y} * length;
-				};
-
-				for(int i = 0; i < numSplats; i++){
-					int splatIndex = splatIndices[debugTile.firstIndex + i];
-					StageData stagedata = stagedatas[splatIndex];
-					// float depth = depths[ordering[splatIndex]];
-					// float depth = stagedata.depth;
-					float depth = 16.0f * float(i) / float(numSplats);
-
-					vec2 imgpos = vec2(stagedata.imgPos_encoded) / 10.0f;
-					uint8_t* rgba = (uint8_t*)&stagedata.color;
-
-					float x = imgpos.x;
-					float y = imgpos.y;
-					float z = depth;
-
-					vec2 basisvector1 = decode_basisvector_i16vec2(stagedata.basisvector1_encoded);
-					vec2 basisvector2 = decode_basisvector_i16vec2(stagedata.basisvector2_encoded);
-
-					ssPointcloud << format("{:.3f}, {:.3f}, {:.3f}, {}, {}, {}, {}, {}, {}, {}, {}\n", 
-						x, y, z, 
-						rgba[0], rgba[1], rgba[2], rgba[3],
-						basisvector1.x, basisvector1.y,
-						basisvector2.x, basisvector2.y
-						);
-				}
-
-				string filename = format("dump_{}_tile_{}_{}.csv", label, tile_x, tile_y);
-				writeFile(filename.c_str(), ssPointcloud.str());
-			};
-
-			for(int tx = -1; tx <= 1; tx++)
-			for(int ty = -1; ty <= 1; ty++)
-			{
-				dumpTile("garden", 60 + tx, 50 + ty);
-			}
-			
-
-
-			for(int tileID = 0; tileID < numTiles; tileID++){
-				Tile tile = tiles[tileID];
-				int tile_x = tileID % tiles_x;
-				int tile_y = tileID / tiles_x;
-
-				ss << format("Tile {:3} / {:3}, first: {:8}, last: {:8}, count: {:6}\n", 
-					tile_x, tile_y,
-					tile.firstIndex, tile.lastIndex, tile.lastIndex - tile.firstIndex
-				);
-			}
-
-			writeFile("./dump.txt", ss.str());
-
-
-			editor->settings.requestDebugDump = false;
-		};
-
+		if(editor->settings.requestDebugDump){ 
+			dump_tile(target, numTiles);
+		}
 
 		if(target.numFragments > 0){
 
@@ -723,15 +589,12 @@ void drawsplats_3dgs_concurrent(
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_solid", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}else if(settings.enableSplatCulling){
 				pointsInTileThreshold = 10'000;
-				// pointsInTileThreshold = 0;
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_with_discard", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.mainstream});
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}else{
 				pointsInTileThreshold = 1'000'000;
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}
-
-
 		}
 	}
 
