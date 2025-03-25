@@ -718,6 +718,9 @@ void SplatEditor::makeToolbar(){
 				editor->settings.requestDebugDump = true;
 			}
 
+			ImGui::SameLine();
+			ImGui::Checkbox("SoA", &editor->settings.renderSoA);
+
 			endSection();
 		}
 

@@ -238,6 +238,7 @@ struct SplatEditor{
 
 		bool showInset = false;
 		float dbg_factor = 1.0f;
+		bool renderSoA = false;
 	} settings;
 
 	struct {

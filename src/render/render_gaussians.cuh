@@ -79,7 +79,7 @@ void kernel_render_gaussians(
 
 	int numPointsInTile = clamp(tile.lastIndex - tile.firstIndex + 1, 0u, 1'000'000u);
 
-	if(numPointsInTile > pointsInTileThreshold) return;
+	// if(numPointsInTile > pointsInTileThreshold) return;
 
 	// __shared__ uint32_t dbg_numAccepted;
 	// __shared__ uint32_t dbg_numRejected;

@@ -24,6 +24,20 @@ struct PaintUndoAction : public Action{
 	void undo(){
 		auto editor = SplatEditor::instance;
 
+		float t_start = 0.0f;
+		static CUevent ce_start = 0;
+		static CUevent ce_end = 0;
+
+		if(ce_start == 0){
+			cuEventCreate(&ce_start, CU_EVENT_DEFAULT);
+			cuEventCreate(&ce_end, CU_EVENT_DEFAULT);
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_start, 0);
+			t_start = now();
+		}
+
 		for(auto [node, undodata] : undodatas){
 
 			GaussianData data = node->dmng.data;
@@ -33,6 +47,18 @@ struct PaintUndoAction : public Action{
 			// to undo, we swap colors from the model's buffer with the indexed stashed colors.
 			void* args[] = {&undodata.cptr_indices, &undodata.cptr_indexedColors, &data.color, &undodata.diffcount};
 			editor->prog_gaussians_editing->launch("kernel_color_diff_swap", args, undodata.diffcount);
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_end, 0);
+			float duration_host = now() - t_start;
+
+			cuCtxSynchronize();
+
+			float duration_device = 0.0f;
+			cuEventElapsedTime(&duration_device, ce_start, ce_end);
+
+			println("PaintUndoAction::undo() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
 		}
 	}
 
@@ -52,11 +78,26 @@ struct PaintUndoAction : public Action{
 	void compaction(){
 		auto editor = SplatEditor::instance;
 
+		float t_start = 0.0f;
+		static CUevent ce_start = 0;
+		static CUevent ce_end = 0;
+
+		if(ce_start == 0){
+			cuEventCreate(&ce_start, CU_EVENT_DEFAULT);
+			cuEventCreate(&ce_end, CU_EVENT_DEFAULT);
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_start, 0);
+			t_start = now();
+		}
+
+		CUdeviceptr cptr_counter = CURuntime::alloc("counter", 4);
+
 		for(auto& [node, undodata] : undodatas){
 
 			GaussianData data = node->dmng.data;
 
-			CUdeviceptr cptr_counter = CURuntime::alloc("counter", 4);
 			cuMemsetD32(cptr_counter, 0, 1);
 
 			void* argsCount[] = {&undodata.cptr_stashedColors, &data.color, &data.count, &cptr_counter};
@@ -81,12 +122,27 @@ struct PaintUndoAction : public Action{
 				undodata.cptr_indexedColors = 0;
 			}
 
-			CURuntime::free(cptr_counter);
 			
 			// no longer needed after compaction
 			CURuntime::free(undodata.cptr_stashedColors); 
 			undodata.cptr_stashedColors = 0;
 		}
+
+		CURuntime::free(cptr_counter);
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_end, 0);
+			float duration_host = now() - t_start;
+
+			cuCtxSynchronize();
+
+			float duration_device = 0.0f;
+			cuEventElapsedTime(&duration_device, ce_start, ce_end);
+
+			println("PaintUndoAction::compaction() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
+		}
+
+
 	}
 
 	int64_t byteSize(){
@@ -166,7 +222,7 @@ struct SpherePaintAction : public InputAction{
 		// auto editor = SplatEditor::instance;
 	}
 
-	void paintBrushStep(vec2 brushPos, float radius){
+	void paintBrushStep(float radius){
 		auto editor = SplatEditor::instance;
 		auto& settings = editor->settings;
 
@@ -196,6 +252,36 @@ struct SpherePaintAction : public InputAction{
 		}
 	}
 
+	void paintBrushSteps(vector<vec2> positions, float radius){
+		// auto editor = SplatEditor::instance;
+		// auto& settings = editor->settings;
+
+		// if(editor->deviceState.hovered_depth < Infinity){
+		// 	vec3 spherePos = editor->deviceState.hovered_pos;
+			
+		// 	int numTicks = 1;
+
+		// 	editor->scene.process<SNSplats>([&](SNSplats* node) {
+
+		// 		if(!node->visible) return;
+		// 		if(node->locked) return;
+		// 		if(!editor->launchArgs.mouseEvents.isLeftDown) return;
+
+		// 		GaussianData& data = node->dmng.data;
+		// 		data.transform = node->transform_global;
+
+		// 		//editor->state.hasPendingPaintingTask = true;
+		// 		auto undodata = currentUndoAction->undodatas[node];
+		// 		CUdeviceptr cptr_stashedColors = undodata.cptr_stashedColors;
+				
+		// 		vec4 color = {paintActionColor.x, paintActionColor.y, paintActionColor.z, paintActionColor.w};
+
+		// 		void* args[] = {&editor->launchArgs, &data, &cptr_stashedColors, &spherePos, &radius, &color, &numTicks};
+		// 		editor->prog_gaussians_editing->launch("kernel_paint_sphere", args, data.count);
+		// 	});
+		// }
+	}
+
 	void update(){
 
 		auto editor = SplatEditor::instance;
@@ -216,10 +302,31 @@ struct SpherePaintAction : public InputAction{
 		const float MIN_STEPDISTANCE = 3.0f;
 		// do a brush step every <stepdistance> pixels
 		// float stepdistance = max(radius / 2.0f, MIN_STEPDISTANCE);
-		float stepdistance = 5.0f;
+		float stepdistance = 50.0f;
 
 		static vec2 lastMousePos = {0.0f, 0.0f};
 		static float accumulatedDistance = 0.0f;
+
+		float t_start = 0.0f;
+		static CUevent ce_start = 0;
+		static CUevent ce_end = 0;
+
+		if(ce_start == 0){
+			cuEventCreate(&ce_start, CU_EVENT_DEFAULT);
+			cuEventCreate(&ce_end, CU_EVENT_DEFAULT);
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_start, 0);
+			t_start = now();
+		}
+
+		// used in a workaround for issue #6
+		// We will interpolate brush steps between the 3-dimensional hover positions
+		static vec3 previousHoverPos;
+		static float previousHoverDepth = Infinity;
+		vec3 hoverPos = editor->deviceState.hovered_pos;
+		float hoverDepth = editor->deviceState.hovered_depth;
 
 
 		// static double lastTick = now();
@@ -233,57 +340,85 @@ struct SpherePaintAction : public InputAction{
 			endUndoable();
 		}
 
+		int numStepsPainted = 0;
 		if(isLeftDown){
-			//   "unrolled" origin                                              
-			//    |                                                       current mouse pos
-			//    |            previous mouse pos                                  |
-			//    |              |                                                 |
-			//    O--------------a-------------------------------------------------b
-			//    |- acc. dist. -|
-			//    |              |-------------------   50 pixels  ----------------|
-			//    S                   S                   S                   S                   S
-			//    |---- 20 pixels ----|---- 20 pixels ----|---- 20 pixels ----|---- 20 pixels ----|
-			// 
-			// stepsize: 20 pixels
-			// O: The unrolled origin is given by the accumulated mouse movement since the last brush step, 
-			//        straightened onto the line between previous frame's mouse pos and current frame's mouse pos.
-			// S: A brush "step" at which we paint. If the mouse moves 50 pixel and we draw every 20 pixels, 
-			//        then there will be 2 or 3 brush steps in a single frame.
-			// 
-			vec2 a = lastMousePos;
-			vec2 b = Runtime::mousePosition;
-			vec2 ab = b - a;
-			vec2 dir_ab = normalize(ab);
-			vec2 O = a - accumulatedDistance * dir_ab;
-			// float distance = length(b - a);
-			float dist_Ob = length(b - O);
 
-			if(leftPressed){
-				vec2 brushPos = b;
-				paintBrushStep(brushPos, radius);
-			}else if(length(b - a) > 0.1f){
+			if(Runtime::measureTimings){
+				// During measurement, paint a step every frame so that we can nicely measure times
+				paintBrushStep(radius);
+			}else{
+				// Otherwise, as a workaround to issue #6, paint a step whenever the mouse moves 5 pixels.
 
-				// println("================================");
-				// println("a: {:6.1f}, {:6.1f}", a.x, a.y);
-				// println("b: {:6.1f}, {:6.1f}", b.x, b.y);
-				// println("O: {:6.1f}, {:6.1f}", O.x, O.y);
-				// println("accumulatedDistance: {:.1f}", accumulatedDistance);
-				// println("dist_Ob:             {:.1f}", dist_Ob);
-				// println("stepdistance:        {:.1f}", stepdistance);
+				//   "unrolled" origin                                              
+				//    |                                                       current mouse pos
+				//    |            previous mouse pos                                  |
+				//    |              |                                                 |
+				//    O--------------a-------------------------------------------------b
+				//    |- acc. dist. -|
+				//    |              |-------------------   50 pixels  ----------------|
+				//    S                   S                   S                   S                   S
+				//    |---- 20 pixels ----|---- 20 pixels ----|---- 20 pixels ----|---- 20 pixels ----|
+				// 
+				// stepsize: 20 pixels
+				// O: The unrolled origin is given by the accumulated mouse movement since the last brush step, 
+				//        straightened onto the line between previous frame's mouse pos and current frame's mouse pos.
+				// S: A brush "step" at which we paint. If the mouse moves 50 pixel and we draw every 20 pixels, 
+				//        then there will be 2 or 3 brush steps in a single frame.
+				// 
+				vec2 a = lastMousePos;
+				vec2 b = Runtime::mousePosition;
+				vec2 ab = b - a;
+				vec2 dir_ab = normalize(ab);
+				vec2 O = a - accumulatedDistance * dir_ab;
+				// float distance = length(b - a);
+				float dist_Ob = length(b - O);
 
-				vec2 lastBrushPos = O;
-				for(float t = stepdistance; t < dist_Ob; t += stepdistance){
-					vec2 brushPos = O + t * dir_ab;
+				if(leftPressed){
+					vec2 brushPos = b;
+					paintBrushStep(radius);
+					numStepsPainted++;
+				}else if(length(b - a) > 0.1f){
 
-					paintBrushStep(brushPos, radius);
+					// println("================================");
+					// println("a: {:6.1f}, {:6.1f}", a.x, a.y);
+					// println("b: {:6.1f}, {:6.1f}", b.x, b.y);
+					// println("O: {:6.1f}, {:6.1f}", O.x, O.y);
+					// println("accumulatedDistance: {:.1f}", accumulatedDistance);
+					// println("dist_Ob:             {:.1f}", dist_Ob);
+					// println("stepdistance:        {:.1f}", stepdistance);
 
-					lastBrushPos = brushPos;
+					vec2 lastBrushPos = O;
+					int c = 0;
+					for(float t = stepdistance; t < dist_Ob; t += stepdistance){
+						vec2 brushPos = O + t * dir_ab;
+
+						// workaround to #6, paint once per frame. 
+						if(c == 0) paintBrushStep(radius);
+
+						numStepsPainted++;
+
+						lastBrushPos = brushPos;
+						c++;
+					}
+					
+					lastMousePos = b;
+					accumulatedDistance = length(b - lastBrushPos);
 				}
-				
-				lastMousePos = b;
-				accumulatedDistance = length(b - lastBrushPos);
 			}
-			
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_end, 0);
+			float duration_host = now() - t_start;
+
+			cuCtxSynchronize();
+
+			float duration_device = 0.0f;
+			cuEventElapsedTime(&duration_device, ce_start, ce_end);
+
+			if(duration_device > 0.005f){
+				println("PaintUndoAction::update() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
+			}
 		}
 
 		if(editor->deviceState.hovered_depth < Infinity){
@@ -312,12 +447,9 @@ struct SpherePaintAction : public InputAction{
 			}
 		}
 
-		// if (!currentUndoAction) return;
+		previousHoverPos = hoverPos;
+		previousHoverDepth = hoverDepth;
 
-		
-
-		
-		
 	}
 
 	void stop(){

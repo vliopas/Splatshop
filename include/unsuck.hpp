@@ -602,7 +602,8 @@ inline string readFile(string path) {
 	std::string str;
 
 	t.seekg(0, std::ios::end);
-	str.reserve(t.tellg());
+	int64_t size = t.tellg();
+	str.reserve(size);
 	t.seekg(0, std::ios::beg);
 
 	str.assign((std::istreambuf_iterator<char>(t)),

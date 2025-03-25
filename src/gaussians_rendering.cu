@@ -835,22 +835,6 @@ void kernel_createTilefragmentArray_perspectivecorrect(
 	}
 }
 
-extern "C" __global__
-void kernel_create_fragwise_stagedata(
-	StageData* splatwise,
-	StageData* fragwise_sorted,
-	uint32_t* indices,
-	uint32_t numTileFragments
-){
-	auto grid = cg::this_grid();
-
-	if(grid.thread_rank() >= numTileFragments) return;
-
-	uint32_t splatIndex = indices[grid.thread_rank()];
-	
-	fragwise_sorted[grid.thread_rank()] = splatwise[splatIndex];
-}
-
 
 extern "C" __global__
 void kernel_prefilter_tiled_stagedata(
