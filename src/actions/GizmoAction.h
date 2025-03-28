@@ -68,6 +68,8 @@ struct GizmoAction : public InputAction{
 	mat4 cummulative = mat4(1.0f);
 	shared_ptr<SceneNode> node = nullptr;
 
+	int32_t numSelectedSplats = 0;
+
 	void beginUndoable(){
 		auto editor = SplatEditor::instance;
 		auto node = editor->getSelectedNode();
@@ -112,7 +114,7 @@ struct GizmoAction : public InputAction{
 
 		node = editor->getSelectedNode();
 
-		int32_t numSelectedSplats = editor->getNumSelectedSplats();
+		numSelectedSplats = editor->getNumSelectedSplats();
 		if(numSelectedSplats > 0){
 			Box3 aabb = editor->getSelectionAABB();
 
@@ -151,6 +153,19 @@ struct GizmoAction : public InputAction{
 
 	void update(){
 
+		float t_start = 0.0f;
+		static CUevent ce_start = 0;
+		static CUevent ce_end = 0;
+		if(ce_start == 0){
+			cuEventCreate(&ce_start, CU_EVENT_DEFAULT);
+			cuEventCreate(&ce_end, CU_EVENT_DEFAULT);
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_start, 0);
+			t_start = now();
+		}
+
 		auto editor = SplatEditor::instance;
 		static ImGuizmo::MODE mCurrentGizmoMode(ImGuizmo::LOCAL);
 
@@ -180,7 +195,7 @@ struct GizmoAction : public InputAction{
 			endUndoable();
 		}
 		
-		int32_t numSelectedSplats = editor->getNumSelectedSplats();
+		// int32_t numSelectedSplats = editor->getNumSelectedSplats();
 		if(numSelectedSplats > 0){
 
 			ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
@@ -235,6 +250,20 @@ struct GizmoAction : public InputAction{
 				}
 			}
 
+		}
+
+		if(Runtime::measureTimings){
+			cuEventRecord(ce_end, 0);
+			float duration_host = now() - t_start;
+
+			cuCtxSynchronize();
+
+			float duration_device = 0.0f;
+			cuEventElapsedTime(&duration_device, ce_start, ce_end);
+
+			if(duration_device > 0.005f){
+				println("GizmoAction::update() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
+			}
 		}
 
 	}

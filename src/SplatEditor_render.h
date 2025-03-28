@@ -217,9 +217,8 @@ void SplatEditor::render(){
 		// 	glMapping.unmap();
 		// }
 
-		if(settings.enableStereoFramebufferTest)
-		{ 
-			// try rendering to multiple targets concurrently
+		if(settings.enableStereoFramebufferTest && settings.enableOverlapped){ 
+			// render to multiple targets concurrently
 			
 			static shared_ptr<CudaVirtualMemory> virt_framebuffer_secondary = CURuntime::allocVirtual("secondary framebuffer (stereo concurrency test)");
 			virt_framebuffer_secondary->commit(virt_framebuffer->comitted);
@@ -227,7 +226,7 @@ void SplatEditor::render(){
 			RenderTarget target;
 			target.width = GLRenderer::width;
 			target.height = GLRenderer::height;
-			target.framebuffer = (uint64_t*)virt_framebuffer_secondary->cptr;
+			target.framebuffer = (uint64_t*)virt_framebuffer->cptr;
 			target.indexbuffer = nullptr;
 			target.view = mat4(GLRenderer::camera->view);
 			target.proj = GLRenderer::camera->proj;
@@ -238,6 +237,88 @@ void SplatEditor::render(){
 			
 			vector<RenderTarget> targets = { target, secondary};
 			draw(&scene, targets);
+
+			Rectangle targetViewport_left;
+			targetViewport_left.x = 0;
+			targetViewport_left.y = 0;
+			targetViewport_left.width = GLRenderer::width / 2;
+			targetViewport_left.height = GLRenderer::height / 2;
+
+			Rectangle targetViewport_right;
+			targetViewport_right.x = GLRenderer::width / 2;
+			targetViewport_right.y = 0;
+			targetViewport_right.width = GLRenderer::width / 2;
+			targetViewport_right.height = GLRenderer::height / 2;
+
+			auto glMapping = mapCudaGl(GLRenderer::view.framebuffer->colorAttachments[0]);
+
+			prog_gaussians_rendering->launch("kernel_blit_opengl", 
+				{&launchArgs, &target, &glMapping.surface, &targetViewport_left}, 
+				targetViewport_left.width * targetViewport_left.height);
+
+			prog_gaussians_rendering->launch("kernel_blit_opengl", 
+				{&launchArgs, &secondary, &glMapping.surface, &targetViewport_right}, 
+				targetViewport_right.width * targetViewport_right.height);
+
+			glMapping.unmap();
+		}else if(settings.enableStereoFramebufferTest && !settings.enableOverlapped){ 
+
+			{ // LEFT
+				RenderTarget target;
+				target.width = GLRenderer::width;
+				target.height = GLRenderer::height;
+				target.framebuffer = (uint64_t*)virt_framebuffer->cptr;
+				target.indexbuffer = nullptr;
+				target.view = mat4(GLRenderer::camera->view);
+				target.proj = GLRenderer::camera->proj;
+				target.VP = GLRenderer::camera->VP;
+
+				draw(&scene, {target});
+
+				Rectangle viewport;
+				viewport.x = 0;
+				viewport.y = 500;
+				viewport.width = GLRenderer::width / 2;
+				viewport.height = GLRenderer::height / 2;
+
+				auto glMapping = mapCudaGl(GLRenderer::view.framebuffer->colorAttachments[0]);
+
+				prog_gaussians_rendering->launch("kernel_blit_opengl", 
+					{&launchArgs, &target, &glMapping.surface, &viewport}, 
+					viewport.width * viewport.height);
+
+				glMapping.unmap();
+			}
+
+			{ // RIGHT
+				RenderTarget target;
+				target.width = GLRenderer::width;
+				target.height = GLRenderer::height;
+				target.framebuffer = (uint64_t*)virt_framebuffer->cptr;
+				target.indexbuffer = nullptr;
+				target.view = mat4(GLRenderer::camera->view);
+				target.proj = GLRenderer::camera->proj;
+				target.VP = GLRenderer::camera->VP;
+
+				draw(&scene, {target});
+
+				Rectangle viewport;
+				viewport.x = GLRenderer::width / 2;
+				viewport.y = 500;
+				viewport.width = GLRenderer::width / 2;
+				viewport.height = GLRenderer::height / 2;
+
+				auto glMapping = mapCudaGl(GLRenderer::view.framebuffer->colorAttachments[0]);
+
+				prog_gaussians_rendering->launch("kernel_blit_opengl", 
+					{&launchArgs, &target, &glMapping.surface, &viewport}, 
+					viewport.width * viewport.height);
+
+				glMapping.unmap();
+			}
+
+
+
 		}else{
 			// standard single-target-rendering
 			RenderTarget target;

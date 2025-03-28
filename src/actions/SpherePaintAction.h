@@ -310,7 +310,6 @@ struct SpherePaintAction : public InputAction{
 		float t_start = 0.0f;
 		static CUevent ce_start = 0;
 		static CUevent ce_end = 0;
-
 		if(ce_start == 0){
 			cuEventCreate(&ce_start, CU_EVENT_DEFAULT);
 			cuEventCreate(&ce_end, CU_EVENT_DEFAULT);
