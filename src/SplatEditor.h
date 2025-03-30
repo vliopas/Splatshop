@@ -240,6 +240,7 @@ struct SplatEditor{
 		float dbg_factor = 1.0f;
 		bool renderSoA = false;
 		bool renderBandwidth = false;
+		bool renderFragIntersections = false;
 	} settings;
 
 	struct {

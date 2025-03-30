@@ -722,6 +722,8 @@ void SplatEditor::makeToolbar(){
 			ImGui::Checkbox("SoA", &editor->settings.renderSoA);
 			ImGui::SameLine();
 			ImGui::Checkbox("Bandwidth", &editor->settings.renderBandwidth);
+			ImGui::SameLine();
+			ImGui::Checkbox("FragIntersections", &editor->settings.renderFragIntersections);
 
 			endSection();
 		}

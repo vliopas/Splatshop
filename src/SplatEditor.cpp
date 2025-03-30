@@ -1090,10 +1090,19 @@ void SplatEditor::uploadSplats(SNSplats* node){
 	int64_t numToUpload = numLoaded - numUploaded;
 
 	if(numToUpload > 0){
-		cuMemcpyHtoD((CUdeviceptr)gd.position   + sizeof(*gd.position)   * numUploaded, splats->position->ptr + sizeof(*gd.position)   * numUploaded , sizeof(*gd.position)   * numToUpload);
-		cuMemcpyHtoD((CUdeviceptr)gd.scale      + sizeof(*gd.scale)      * numUploaded, splats->scale->ptr    + sizeof(*gd.scale)      * numUploaded , sizeof(*gd.scale)      * numToUpload);
-		cuMemcpyHtoD((CUdeviceptr)gd.quaternion + sizeof(*gd.quaternion) * numUploaded, splats->rotation->ptr + sizeof(*gd.quaternion) * numUploaded , sizeof(*gd.quaternion) * numToUpload);
-		cuMemcpyHtoD((CUdeviceptr)gd.color      + sizeof(*gd.color)      * numUploaded, splats->color->ptr    + sizeof(*gd.color)      * numUploaded , sizeof(*gd.color)      * numToUpload);
+		CURuntime::check(cuMemcpyHtoD((CUdeviceptr)gd.position           + sizeof(*gd.position)          * numUploaded, splats->position->ptr + sizeof(*gd.position)   * numUploaded , sizeof(*gd.position)   * numToUpload));
+		CURuntime::check(cuMemcpyHtoD((CUdeviceptr)gd.scale              + sizeof(*gd.scale)             * numUploaded, splats->scale->ptr    + sizeof(*gd.scale)      * numUploaded , sizeof(*gd.scale)      * numToUpload));
+		CURuntime::check(cuMemcpyHtoD((CUdeviceptr)gd.quaternion         + sizeof(*gd.quaternion)        * numUploaded, splats->rotation->ptr + sizeof(*gd.quaternion) * numUploaded , sizeof(*gd.quaternion) * numToUpload));
+		CURuntime::check(cuMemcpyHtoD((CUdeviceptr)gd.color              + sizeof(*gd.color)             * numUploaded, splats->color->ptr    + sizeof(*gd.color)      * numUploaded , sizeof(*gd.color)      * numToUpload));
+
+		if(gd.shDegree > 0){
+			int64_t shBytesPerSplat = gd.numSHCoefficients * sizeof(float);
+			CURuntime::check(cuMemcpyHtoD(
+				(CUdeviceptr)gd.sphericalHarmonics + shBytesPerSplat * numUploaded, 
+				splats->SHs->ptr + shBytesPerSplat * numUploaded,
+				shBytesPerSplat * numToUpload));
+		}
+
 
 		gd.count += numToUpload;
 		gd.numUploaded += numToUpload;
@@ -1209,6 +1218,8 @@ void SplatEditor::sortSplatsDevice(SNSplats* node, bool putDeletedLast){
 	GaussianData data = node->dmng.data;
 	Box3 aabb = node->aabb;
 
+	int64_t maxBytesPerSplatAttribute = max(16llu, data.numSHCoefficients * sizeof(float));
+
 	#define USE_32BIT
 
 	#if defined(USE_32BIT)
@@ -1217,7 +1228,7 @@ void SplatEditor::sortSplatsDevice(SNSplats* node, bool putDeletedLast){
 		CUdeviceptr cptr_tmpstorage;
 		cuMemAlloc(&cptr_mortoncodes, 4 * data.count);
 		cuMemAlloc(&cptr_ordering, 4 * data.count);
-		cuMemAlloc(&cptr_tmpstorage, 16 * data.count);
+		cuMemAlloc(&cptr_tmpstorage, maxBytesPerSplatAttribute * data.count);
 
 		prog_gaussians_editing->launch("kernel_compute_mortoncodes_32bit", {&data, &aabb, &cptr_mortoncodes, &cptr_ordering}, data.count);
 
@@ -1229,41 +1240,41 @@ void SplatEditor::sortSplatsDevice(SNSplats* node, bool putDeletedLast){
 		GPUSorting::sort_32bit_keyvalue(data.count, cptr_mortoncodes, cptr_ordering);
 	#else
 	
-		CUdeviceptr cptr_mortoncodes_lower;
-		CUdeviceptr cptr_mortoncodes_higher;
-		CUdeviceptr cptr_ordering;
-		CUdeviceptr cptr_tmpstorage;
-		cuMemAlloc(&cptr_mortoncodes_lower, 4 * data.count);
-		cuMemAlloc(&cptr_mortoncodes_higher, 4 * data.count);
-		cuMemAlloc(&cptr_ordering, 4 * data.count);
-		cuMemAlloc(&cptr_tmpstorage, 16 * data.count);
+		// CUdeviceptr cptr_mortoncodes_lower;
+		// CUdeviceptr cptr_mortoncodes_higher;
+		// CUdeviceptr cptr_ordering;
+		// CUdeviceptr cptr_tmpstorage;
+		// cuMemAlloc(&cptr_mortoncodes_lower, 4 * data.count);
+		// cuMemAlloc(&cptr_mortoncodes_higher, 4 * data.count);
+		// cuMemAlloc(&cptr_ordering, 4 * data.count);
+		// cuMemAlloc(&cptr_tmpstorage, 16 * data.count);
 
-		prog_gaussians_editing->launch("kernel_compute_mortoncodes_2x32bit", {&data, &aabb, &cptr_mortoncodes_lower, &cptr_mortoncodes_higher, &cptr_ordering}, data.count);
+		// prog_gaussians_editing->launch("kernel_compute_mortoncodes_2x32bit", {&data, &aabb, &cptr_mortoncodes_lower, &cptr_mortoncodes_higher, &cptr_ordering}, data.count);
 
-		if(putDeletedLast){
-			// set mortoncode to maxval to put them last.
-			prog_gaussians_editing->launch("kernel_compute_deletionlist", {&data, &cptr_mortoncodes_lower}, data.count);
-			prog_gaussians_editing->launch("kernel_compute_deletionlist", {&data, &cptr_mortoncodes_higher}, data.count);
-		}
+		// if(putDeletedLast){
+		// 	// set mortoncode to maxval to put them last.
+		// 	prog_gaussians_editing->launch("kernel_compute_deletionlist", {&data, &cptr_mortoncodes_lower}, data.count);
+		// 	prog_gaussians_editing->launch("kernel_compute_deletionlist", {&data, &cptr_mortoncodes_higher}, data.count);
+		// }
 
-		// sort by 32 least-significant bits of the morton code
-		GPUSorting::sort_32bit_keyvalue(data.count, cptr_mortoncodes_lower, cptr_ordering);
+		// // sort by 32 least-significant bits of the morton code
+		// GPUSorting::sort_32bit_keyvalue(data.count, cptr_mortoncodes_lower, cptr_ordering);
 
-		// Next, we need to apply that ordering to the higher-significant bits of the morton code, 
-		// before sorting by the higher-significant bits.
-		{
-			// We don't need cptr_mortoncodes_lower lower anymore, 
-			// but we need a source and target buffer for unsorted and sorted cptr_mortoncodes_higher.
-			// Reusing cptr_mortoncodes_lower as that target buffer.
-			CUdeviceptr cptr_higher_unsorted = cptr_mortoncodes_higher;
-			CUdeviceptr cptr_higher_sorted = cptr_mortoncodes_lower;
+		// // Next, we need to apply that ordering to the higher-significant bits of the morton code, 
+		// // before sorting by the higher-significant bits.
+		// {
+		// 	// We don't need cptr_mortoncodes_lower lower anymore, 
+		// 	// but we need a source and target buffer for unsorted and sorted cptr_mortoncodes_higher.
+		// 	// Reusing cptr_mortoncodes_lower as that target buffer.
+		// 	CUdeviceptr cptr_higher_unsorted = cptr_mortoncodes_higher;
+		// 	CUdeviceptr cptr_higher_sorted = cptr_mortoncodes_lower;
 
-			void* argsApply[] = {&cptr_higher_unsorted, &cptr_higher_sorted, &cptr_ordering, &data.count};
-			prog_gaussians_rendering->launch("kernel_applyOrdering_u32", argsApply, data.count);
+		// 	void* argsApply[] = {&cptr_higher_unsorted, &cptr_higher_sorted, &cptr_ordering, &data.count};
+		// 	prog_gaussians_rendering->launch("kernel_applyOrdering_u32", argsApply, data.count);
 
-			// Now sort ordering by the 32 most-significant bits of the 64 bit morton code
-			GPUSorting::sort_32bit_keyvalue(data.count, cptr_higher_sorted, cptr_ordering);
-		}
+		// 	// Now sort ordering by the 32 most-significant bits of the 64 bit morton code
+		// 	GPUSorting::sort_32bit_keyvalue(data.count, cptr_higher_sorted, cptr_ordering);
+		// }
 	#endif
 
 
@@ -1294,6 +1305,14 @@ void SplatEditor::sortSplatsDevice(SNSplats* node, bool putDeletedLast){
 	stride = sizeof(*data.flags);
 	cuMemcpy(cptr_tmpstorage, (CUdeviceptr)data.flags, stride * data.count);
 	prog_gaussians_rendering->launch("kernel_applyOrdering_xxx", {&cptr_tmpstorage, &data.flags, &cptr_ordering, &stride, &data.count}, data.count);
+
+	// SHs
+	if(data.shDegree > 0){
+		stride = data.numSHCoefficients * sizeof(float);
+		cuMemcpy(cptr_tmpstorage, (CUdeviceptr)data.sphericalHarmonics, stride * data.count);
+		prog_gaussians_rendering->launch("kernel_applyOrdering_xxx", {&cptr_tmpstorage, &data.sphericalHarmonics, &cptr_ordering, &stride, &data.count}, data.count);
+	}
+	
 
 	#if defined(USE_32BIT)
 		cuMemFree(cptr_mortoncodes);

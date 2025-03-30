@@ -18,6 +18,8 @@ struct SNSplats : public SceneNode{
 		: SceneNode(name), dmng(name)
 	{
 		this->splats = splats;
+		this->dmng.data.numSHCoefficients = splats->numSHCoefficients;
+		this->dmng.data.shDegree = splats->shDegree;
 	}
 
 	SNSplats(string name)

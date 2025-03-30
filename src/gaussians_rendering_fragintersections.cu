@@ -1,5 +1,7 @@
-// This serves to evaluate the impact of memory bandwidth from large reads and writes.
-// It is not meant to be for regular use. 
+
+// CHECKLICENSE
+// much stuff from https://github.com/mkkellogg/GaussianSplats3D/blob/main/LICENSE
+// (MIT license)
 
 #include <cooperative_groups/scan.h>
 #include <cooperative_groups/reduce.h>
@@ -16,11 +18,13 @@ namespace std{
 using namespace std;
 
 #include <cuda_fp16.h>
+
 #include "./libs/glm/glm/glm.hpp"
+#include "./libs/glm/glm/gtc/quaternion.hpp"
+
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
 #include "math.cuh"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
 
 namespace cg = cooperative_groups;
 
@@ -38,6 +42,8 @@ using glm::inverse;
 constexpr int VIEWMODE_DESKTOP = 0;
 constexpr int VIEWMODE_DESKTOP_VR = 1;
 constexpr int VIEWMODE_IMMERSIVE_VR = 2;
+// constexpr uint32_t BACKGROUND_COLOR = 0xff000000;
+// constexpr uint32_t BACKGROUND_COLOR = 0xffffffff;
 constexpr uint32_t BACKGROUND_COLOR = 0xff443322;
 constexpr uint64_t DEFAULT_PIXEL = (uint64_t(Infinity) << 32) | BACKGROUND_COLOR;
 
@@ -164,6 +170,82 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 
 #endif
 
+// based on https://github.com/sjtuzq/point-radiance/blob/main/modules/sh.py (Differentiable Point-Based Radiance Fields for Efficient View Synthesis)
+// and Inria 3DGS forward.cu - computeColorFromSH() (3D Gaussian Splatting for Real-Time Radiance Field Rendering)
+vec3 getHarmonics(
+	int degree, 
+	int numCoefficients, 
+	vec3 camdir,
+	vec3* sh
+){
+	// SH coefficients from https://github.com/sjtuzq/point-radiance/blob/main/modules/sh.py
+	// (BSD 2-clause license), Copyright 2021 The PlenOctree Authors.
+	// constexpr float C0 = 0.28209479177387814;
+	constexpr float C1 = 0.4886025119029199;
+	constexpr float C2[] = {
+		 1.0925484305920792f,
+		-1.0925484305920792f,
+		 0.31539156525252005f,
+		-1.0925484305920792f,
+		 0.5462742152960396f
+	};
+	constexpr float C3[] = {
+		-0.5900435899266435f,
+		 2.890611442640554f,
+		-0.4570457994644658f,
+		 0.3731763325901154f,
+		-0.4570457994644658f,
+		 1.445305721320277f,
+		-0.5900435899266435f
+	};
+	constexpr float C4[] = {
+		 2.5033429417967046f,
+		-1.7701307697799304f,
+		 0.9461746957575601f,
+		-0.6690465435572892f,
+		 0.10578554691520431f,
+		-0.6690465435572892f,
+		 0.47308734787878004f,
+		-1.7701307697799304f,
+		 0.6258357354491761f,
+	};
+	
+	vec3 result = {0.0f, 0.0f, 0.0f};
+	result = result -
+		C1 * camdir.y * sh[0] + 
+		C1 * camdir.z * sh[1] - 
+		C1 * camdir.x * sh[2];
+
+	float xx = camdir.x * camdir.x;
+	float yy = camdir.y * camdir.y;
+	float zz = camdir.z * camdir.z;
+	float xy = camdir.x * camdir.y; 
+	float yz = camdir.y * camdir.z; 
+	float xz = camdir.x * camdir.z;
+
+	if(degree > 1){
+		result = result +
+			C2[0] * xy * sh[3] +
+			C2[1] * yz * sh[4] +
+			C2[2] * (2.0f * zz - xx - yy) * sh[5] +
+			C2[3] * xz * sh[6] +
+			C2[4] * (xx - yy) * sh[7];
+	}
+
+	if(degree > 2){
+		result = result +
+			C3[0] * camdir.y * (3.0f * xx - yy) * sh[8] +
+			C3[1] * xy * camdir.z * sh[9] +
+			C3[2] * camdir.y * (4.0f * zz - xx - yy) * sh[10] +
+			C3[3] * camdir.z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * sh[11] +
+			C3[4] * camdir.x * (4.0f * zz - xx - yy) * sh[12] +
+			C3[5] * camdir.z * (xx - yy) * sh[13] +
+			C3[6] * camdir.x * (xx - 3.0f * yy) * sh[14];
+	}
+
+	return result;
+}
+
 // We need the same iteration logic for "touched" tiles in multiple kernels. 
 template <typename Function>
 void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
@@ -194,8 +276,6 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 	tile_start.y = max(tile_start.y, 0);
 	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
 
-	int tileFrags = 0;
-
 	// float diag = 22.627416997969522f;  // sqrt(16.0f * 16.0f + 16.0f * 16.0f);
 	float tileRadius = 11.313708498984761f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
 	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
@@ -210,6 +290,7 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 			basisVector2
 		);
 
+		// for this evaluation, accept all fragments inside the splat's bounding box.
 		intersectsTile = true;
 
 		if(intersectsTile){
@@ -230,24 +311,19 @@ void kernel_stageSplats(
 	RenderTarget target,
 	ColorCorrection colorCorrection,
 	GaussianData model,
-	float* fluff_in,
-
 	// out
 	uint32_t* visibleSplatCounter,
 	uint32_t* numTilefragments,
 	uint32_t* numTilefragments_splatwise,
 	float* staging_depth,
 	StageData* staging_data,
-	uint32_t* ordering,
-	float* fluff_out
+	uint32_t* ordering
 ){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
 	int splatIndex = grid.thread_rank();
 
 	if(splatIndex >= model.count) return;
-
-	if(splatIndex == 0) printf("bandwidth\n");
 
 	mat4 world = model.transform;
 	mat4 view = target.view;
@@ -264,20 +340,33 @@ void kernel_stageSplats(
 	ndc.y = ndc.y / ndc.w;
 	ndc.z = ndc.z / ndc.w;
 
+
+	// if(grid.thread_rank() == 0) printf("=============\n");
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.position));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.scale));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.quaternion));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.color));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.sphericalHarmonics));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.cov3d));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.depth));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.flags));
+
 	if(ndc.w <= 0.0f) return;
 	if(ndc.x < -1.1f || ndc.x >  1.1f) return;
 	if(ndc.y < -1.1f || ndc.y >  1.1f) return;
 
 	vec4 color = model.color[splatIndex].normalized();
 
-	{
-		for(int i = 0; i < 45; i++){
-			color.a += fluff_in[45 * splatIndex + i];
-		}
+	// WIP
+	// if(model.shDegree > 0){
+	// 	int64_t offset = splatIndex * model.numSHCoefficients;
+	// 	vec3* sh = (vec3*)(model.sphericalHarmonics + offset);
+	// 	vec3 camPos = target.view * vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	// 	vec3 camdir = normalize(vec3(worldPos) - camPos);
+		
+	// 	color = color + vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, sh), 0.0f);
+	// }
 
-		// color.a += fluff[splatIndex];
-
-	}
 
 	vec4 quat = model.quaternion[splatIndex];
 
@@ -288,7 +377,8 @@ void kernel_stageSplats(
 	// // __half qz = __half(quat.z);
 	// // __half qw = __half(quat.w);
 
-	mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
+	auto q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+	mat3 rotation = glm::mat3_cast(q);
 
 	mat3 scale = mat3(1.0f);
 	scale[0][0] = model.scale[splatIndex].x;
@@ -487,18 +577,6 @@ void kernel_stageSplats(
 
 	staging_depth[visibleSplatID] = depth;
 	staging_data[visibleSplatID] = stuff;
-	
-
-	// fluff_out[10 * visibleSplatID + 0] = color.r;
-	// fluff_out[10 * visibleSplatID + 1] = color.g;
-	// fluff_out[10 * visibleSplatID + 2] = color.b;
-	// fluff_out[10 * visibleSplatID + 3] = color.a;
-	// fluff_out[10 * visibleSplatID + 4] = flags;
-	// fluff_out[10 * visibleSplatID + 5] = tile_start.x;
-	// fluff_out[10 * visibleSplatID + 6] = tile_start.y;
-	// fluff_out[10 * visibleSplatID + 7] = tile_end.y;
-	// fluff_out[10 * visibleSplatID + 8] = tile_end.y;
-	// fluff_out[10 * visibleSplatID + 9] = depth;
 
 	// Count tile fragments that each splat produces
 	uint32_t tileFrags = 0;
@@ -563,6 +641,7 @@ void kernel_stageSplats_perspectivecorrect(
 	if (color.a < MIN_ALPHA_THRESHOLD) return;
 	vec4 quat = model.quaternion[splatIndex];
 	mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
+
 	mat3 scale = mat3(0.0f);
 	scale[0][0] = model.scale[splatIndex].x;
 	scale[1][1] = model.scale[splatIndex].y;
@@ -750,31 +829,14 @@ void kernel_createTilefragmentArray(
 	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
 	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
 
-	ivec2 tile_start = {
-		(pixelCoord.x - quadHalfWidth) / TILE_SIZE_3DGS,
-		(pixelCoord.y - quadHalfHeight) / TILE_SIZE_3DGS};
-	ivec2 tile_end = {
-		(pixelCoord.x + quadHalfWidth) / TILE_SIZE_3DGS,
-		(pixelCoord.y + quadHalfHeight) / TILE_SIZE_3DGS};
-
-	tile_start.x = max(tile_start.x, 0);
-	tile_end.x = min(tile_end.x, int(tiles_x) - 1);
-
-	tile_start.y = max(tile_start.y, 0);
-	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
-
-	int ltiles_x = (tile_end.x - tile_start.x) + 1;
-	int ltiles_y = (tile_end.y - tile_start.y) + 1;
-	int numTiles = ltiles_x * ltiles_y;
-
 	uint32_t fragmentOffset = prefixsum[index];
-
+	
 	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
 		uint32_t tileID = tile_x + tile_y * tiles_x;
-
+		
 		tileIDs[fragmentOffset] = tileID;
 		splatIDs[fragmentOffset] = order;
-
+		
 		fragmentOffset++;
 	});
 	

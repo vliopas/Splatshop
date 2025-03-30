@@ -363,6 +363,8 @@ struct GaussianData{
 	bool visible = true;
 	bool locked = false;
 	bool writeDepth = true;
+	int shDegree = 0;
+	int numSHCoefficients = 0;
 
 	mat4 transform = mat4(1.0f);
 
@@ -370,16 +372,17 @@ struct GaussianData{
 	vec3 max;
 
 	// Splat Attributes
-	vec3* position           = nullptr;
-	vec3* scale              = nullptr;
-	vec4* quaternion         = nullptr;
-	Color* color             = nullptr;
+	vec3* position             = nullptr;
+	vec3* scale                = nullptr;
+	vec4* quaternion           = nullptr;
+	Color* color               = nullptr;
+	float* sphericalHarmonics  = nullptr;
 
-	Cov3DElements* cov3d     = nullptr;
+	Cov3DElements* cov3d       = nullptr;
 
 	// auxilliary attributes, used for rendering and modification
-	float* depth             = nullptr;
-	uint32_t* flags          = nullptr;
+	float* depth               = nullptr;
+	uint32_t* flags            = nullptr;
 	// StageData* basisvectorsNstuff = nullptr;
 };
 

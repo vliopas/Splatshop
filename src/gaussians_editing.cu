@@ -18,7 +18,7 @@ using namespace std;
 #include "./libs/glm/glm/gtc/matrix_transform.hpp"
 // #include "./libs/glm/glm/gtc/matrix_access.hpp"
 #include "./libs/glm/glm/gtx/transform.hpp"
-// #include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "./libs/glm/glm/gtc/quaternion.hpp"
 #include "./libs/glm/glm/gtx/matrix_decompose.hpp"
 
 #include "utils.cuh"
@@ -88,34 +88,6 @@ bool getBit(void* buffer, uint32_t bitIndex){
 	bool isSet = ((word >> localBitIndex) & 1) == 1;
 
 	return isSet;
-}
-
-// TODO: can we remove this with a glm equivalent?
-mat3 quatToMat3(float qw, float qx, float qy, float qz){
-	float qxx = qx * qx;
-	float qyy = qy * qy;
-	float qzz = qz * qz;
-	float qxz = qx * qz;
-	float qxy = qx * qy;
-	float qyz = qy * qz;
-	float qwx = qw * qx;
-	float qwy = qw * qy;
-	float qwz = qw * qz;
-
-	mat3 rotation = mat3(1.0f);
-	rotation[0][0] = 1.0f - 2.0f * (qyy +  qzz);
-	rotation[0][1] = 2.0f * (qxy + qwz);
-	rotation[0][2] = 2.0f * (qxz - qwy);
-
-	rotation[1][0] = 2.0f * (qxy - qwz);
-	rotation[1][1] = 1.0f - 2.0f * (qxx +  qzz);
-	rotation[1][2] = 2.0f * (qyz + qwx);
-
-	rotation[2][0] = 2.0f * (qxz + qwy);
-	rotation[2][1] = 2.0f * (qyz - qwx);
-	rotation[2][2] = 1.0f - 2.0f * (qxx +  qyy);
-
-	return rotation;
 }
 
 vec3 getRayDir(vec2 pixelCoord, RenderTarget target){
@@ -455,7 +427,7 @@ void kernel_rectselect(
 		if(ndc.y < -1.1f || ndc.y >  1.1f) return false;
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 
 		mat3 scale = mat3(1.0f);
 		scale[0][0] = model.scale[index].x;
@@ -658,7 +630,7 @@ void kernel_select_vr(
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
 		vec3 scale = model.scale[index] * dscale;
@@ -805,7 +777,7 @@ void kernel_select_sphere(
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
 		vec3 scale = model.scale[index];
@@ -1376,7 +1348,7 @@ void kernel_brushselect(
 			vec4 viewPos = view * worldPos;
 			vec4 ndc = proj * viewPos;
 			vec4 quat = model.quaternion[splatIndex];
-			mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+			mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 			mat3 scale = mat3(1.0f);
 			scale[0][0] = model.scale[splatIndex].x;
 			scale[1][1] = model.scale[splatIndex].y;

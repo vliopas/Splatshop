@@ -158,6 +158,12 @@ struct GSPlyLoader{
 		println("shDegree:          {}", header.shDegree);
 		println("numSHCoefficients: {}", header.numSHCoefficients);
 
+		// deactivate SHs
+		header.numSHCoefficients = 0;
+		header.shDegree = 0;
+
+		int64_t numSHBytes = header.numSHCoefficients * sizeof(float);
+
 		shared_ptr<Splats> splats = make_shared<Splats>();
 
 		splats->name = fs::path(path).filename().string();
@@ -169,14 +175,14 @@ struct GSPlyLoader{
 		splats->numSHCoefficients = header.numSHCoefficients;
 		splats->shDegree          = header.shDegree;
 
-
 		splats->position = make_shared<Buffer>(header.numSplats * sizeof(vec3));
 		splats->scale    = make_shared<Buffer>(header.numSplats * sizeof(vec3));
 		splats->rotation = make_shared<Buffer>(header.numSplats * sizeof(vec4));
 		splats->color    = make_shared<Buffer>(header.numSplats *  8llu);
-		splats->SHs      = nullptr;
+		splats->SHs      = make_shared<Buffer>(header.numSplats *  numSHBytes);
+
 		
-		auto t = jthread([header, path, splats](){
+		auto t = jthread([header, path, splats, numSHBytes](){
 
 			double t_start = now();
 
@@ -269,8 +275,13 @@ struct GSPlyLoader{
 					splats->color->set<uint16_t>(clamp(65536.0f * b, 0.0f, 65535.0f), 8llu * i + 4llu);
 				}
 
-				// if(splats.SHs)
-				// memcpy(splats.SHs->ptr + numSHBytes * i  , buffer.ptr + srcOffset + header.OFFSETS_SHs       , numSHBytes);
+				if(splats->SHs){
+					memcpy(
+						splats->SHs->ptr + numSHBytes * i, 
+						buffer.ptr + srcOffset + header.OFFSETS_SHs, 
+						numSHBytes
+					);
+				}
 
 				float opacity = buffer.get<float>(srcOffset + header.OFFSETS_OPACITY);
 				opacity = (1.0 / (1.0 + std::exp(-opacity)));
@@ -289,9 +300,6 @@ struct GSPlyLoader{
 
 		// t.join();
 		t.detach();
-
-		splats->shDegree = 0;
-		splats->numSHCoefficients = 0;
 
 		return splats;
 	}

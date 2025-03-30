@@ -108,20 +108,6 @@ struct SplatsyFilesLoader{
 			}
 		}
 
-		// for(json j_node : js["assets"]){
-		// 	string type = j_node["type"];
-
-		// 	if(type == "SNSplats"){
-		// 		string name = j_node["name"];
-		// 		string nodePath = format("{}/assets/{}.ply", directory, name);
-
-		// 		auto node = loadSNSplats(nodePath, j_node, scene);
-		// 		node->dmng.data.writeDepth = false;
-		// 		node->hidden = true;
-		// 		AssetLibrary::assets.push_back(node);
-		// 	}
-		// }
-
 		json j_camera = js["camera"];
 		controls.yaw = j_camera["yaw"];
 		controls.pitch = j_camera["pitch"];

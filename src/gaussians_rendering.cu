@@ -23,7 +23,7 @@ using namespace std;
 // #include "./libs/glm/glm/gtc/matrix_transform.hpp"
 // #include "./libs/glm/glm/gtc/matrix_access.hpp"
 // #include "./libs/glm/glm/gtx/transform.hpp"
-// #include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "./libs/glm/glm/gtc/quaternion.hpp"
 // #include "./libs/glm/glm/gtx/matrix_decompose.hpp"
 
 #include "utils.cuh"
@@ -174,6 +174,82 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 
 #endif
 
+// based on https://github.com/sjtuzq/point-radiance/blob/main/modules/sh.py (Differentiable Point-Based Radiance Fields for Efficient View Synthesis)
+// and Inria 3DGS forward.cu - computeColorFromSH() (3D Gaussian Splatting for Real-Time Radiance Field Rendering)
+vec3 getHarmonics(
+	int degree, 
+	int numCoefficients, 
+	vec3 camdir,
+	vec3* sh
+){
+	// SH coefficients from https://github.com/sjtuzq/point-radiance/blob/main/modules/sh.py
+	// (BSD 2-clause license), Copyright 2021 The PlenOctree Authors.
+	// constexpr float C0 = 0.28209479177387814;
+	constexpr float C1 = 0.4886025119029199;
+	constexpr float C2[] = {
+		 1.0925484305920792f,
+		-1.0925484305920792f,
+		 0.31539156525252005f,
+		-1.0925484305920792f,
+		 0.5462742152960396f
+	};
+	constexpr float C3[] = {
+		-0.5900435899266435f,
+		 2.890611442640554f,
+		-0.4570457994644658f,
+		 0.3731763325901154f,
+		-0.4570457994644658f,
+		 1.445305721320277f,
+		-0.5900435899266435f
+	};
+	constexpr float C4[] = {
+		 2.5033429417967046f,
+		-1.7701307697799304f,
+		 0.9461746957575601f,
+		-0.6690465435572892f,
+		 0.10578554691520431f,
+		-0.6690465435572892f,
+		 0.47308734787878004f,
+		-1.7701307697799304f,
+		 0.6258357354491761f,
+	};
+	
+	vec3 result = {0.0f, 0.0f, 0.0f};
+	result = result -
+		C1 * camdir.y * sh[0] + 
+		C1 * camdir.z * sh[1] - 
+		C1 * camdir.x * sh[2];
+
+	float xx = camdir.x * camdir.x;
+	float yy = camdir.y * camdir.y;
+	float zz = camdir.z * camdir.z;
+	float xy = camdir.x * camdir.y; 
+	float yz = camdir.y * camdir.z; 
+	float xz = camdir.x * camdir.z;
+
+	if(degree > 1){
+		result = result +
+			C2[0] * xy * sh[3] +
+			C2[1] * yz * sh[4] +
+			C2[2] * (2.0f * zz - xx - yy) * sh[5] +
+			C2[3] * xz * sh[6] +
+			C2[4] * (xx - yy) * sh[7];
+	}
+
+	if(degree > 2){
+		result = result +
+			C3[0] * camdir.y * (3.0f * xx - yy) * sh[8] +
+			C3[1] * xy * camdir.z * sh[9] +
+			C3[2] * camdir.y * (4.0f * zz - xx - yy) * sh[10] +
+			C3[3] * camdir.z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * sh[11] +
+			C3[4] * camdir.x * (4.0f * zz - xx - yy) * sh[12] +
+			C3[5] * camdir.z * (xx - yy) * sh[13] +
+			C3[6] * camdir.x * (xx - 3.0f * yy) * sh[14];
+	}
+
+	return result;
+}
+
 // We need the same iteration logic for "touched" tiles in multiple kernels. 
 template <typename Function>
 void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
@@ -220,7 +296,7 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 			basisVector2
 		);
 
-		intersectsTile = true;
+		// intersectsTile = true;
 
 		if(intersectsTile){
 			f(tile_x, tile_y);
@@ -230,34 +306,6 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 
 bool isDebugTile(int x, int y){
 	return x == dbgtile_x && y == dbgtile_y;
-}
-
-// TODO: can we remove this with a glm equivalent?
-mat3 quatToMat3(float qw, float qx, float qy, float qz){
-	float qxx = qx * qx;
-	float qyy = qy * qy;
-	float qzz = qz * qz;
-	float qxz = qx * qz;
-	float qxy = qx * qy;
-	float qyz = qy * qz;
-	float qwx = qw * qx;
-	float qwy = qw * qy;
-	float qwz = qw * qz;
-
-	mat3 rotation = mat3(1.0f);
-	rotation[0][0] = 1.0f - 2.0f * (qyy +  qzz);
-	rotation[0][1] = 2.0f * (qxy + qwz);
-	rotation[0][2] = 2.0f * (qxz - qwy);
-
-	rotation[1][0] = 2.0f * (qxy - qwz);
-	rotation[1][1] = 1.0f - 2.0f * (qxx +  qzz);
-	rotation[1][2] = 2.0f * (qyz + qwx);
-
-	rotation[2][0] = 2.0f * (qxz + qwy);
-	rotation[2][1] = 2.0f * (qyz - qwx);
-	rotation[2][2] = 1.0f - 2.0f * (qxx +  qyy);
-
-	return rotation;
 }
 
 // stages the model for rasterization, meaning it creates tile fragments for each tile the splat overlaps, and adds it to the staging buffer.
@@ -297,11 +345,33 @@ void kernel_stageSplats(
 	ndc.y = ndc.y / ndc.w;
 	ndc.z = ndc.z / ndc.w;
 
+
+	// if(grid.thread_rank() == 0) printf("=============\n");
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.position));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.scale));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.quaternion));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.color));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.sphericalHarmonics));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.cov3d));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.depth));
+	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.flags));
+
 	if(ndc.w <= 0.0f) return;
 	if(ndc.x < -1.1f || ndc.x >  1.1f) return;
 	if(ndc.y < -1.1f || ndc.y >  1.1f) return;
 
 	vec4 color = model.color[splatIndex].normalized();
+
+	// WIP
+	// if(model.shDegree > 0){
+	// 	int64_t offset = splatIndex * model.numSHCoefficients;
+	// 	vec3* sh = (vec3*)(model.sphericalHarmonics + offset);
+	// 	vec3 camPos = target.view * vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	// 	vec3 camdir = normalize(vec3(worldPos) - camPos);
+		
+	// 	color = color + vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, sh), 0.0f);
+	// }
+
 
 	vec4 quat = model.quaternion[splatIndex];
 
@@ -312,9 +382,8 @@ void kernel_stageSplats(
 	// // __half qz = __half(quat.z);
 	// // __half qw = __half(quat.w);
 
-	// // mat3 rotation = quatToMat3(qx, qy, qz, qw);
-	mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
-	// mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, float(qw) / 127.0f);
+	auto q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+	mat3 rotation = glm::mat3_cast(q);
 
 	mat3 scale = mat3(1.0f);
 	scale[0][0] = model.scale[splatIndex].x;
@@ -576,7 +645,8 @@ void kernel_stageSplats_perspectivecorrect(
 	vec4 color = model.color[splatIndex].normalized();
 	if (color.a < MIN_ALPHA_THRESHOLD) return;
 	vec4 quat = model.quaternion[splatIndex];
-	mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+	mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
+
 	mat3 scale = mat3(0.0f);
 	scale[0][0] = model.scale[splatIndex].x;
 	scale[1][1] = model.scale[splatIndex].y;

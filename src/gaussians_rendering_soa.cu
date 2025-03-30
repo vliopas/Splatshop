@@ -21,6 +21,7 @@ using namespace std;
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
 #include "math.cuh"
+#include "./libs/glm/glm/gtc/quaternion.hpp"
 
 namespace cg = cooperative_groups;
 
@@ -212,34 +213,6 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 	}
 }
 
-// TODO: can we remove this with a glm equivalent?
-mat3 quatToMat3(float qw, float qx, float qy, float qz){
-	float qxx = qx * qx;
-	float qyy = qy * qy;
-	float qzz = qz * qz;
-	float qxz = qx * qz;
-	float qxy = qx * qy;
-	float qyz = qy * qz;
-	float qwx = qw * qx;
-	float qwy = qw * qy;
-	float qwz = qw * qz;
-
-	mat3 rotation = mat3(1.0f);
-	rotation[0][0] = 1.0f - 2.0f * (qyy +  qzz);
-	rotation[0][1] = 2.0f * (qxy + qwz);
-	rotation[0][2] = 2.0f * (qxz - qwy);
-
-	rotation[1][0] = 2.0f * (qxy - qwz);
-	rotation[1][1] = 1.0f - 2.0f * (qxx +  qzz);
-	rotation[1][2] = 2.0f * (qyz + qwx);
-
-	rotation[2][0] = 2.0f * (qxz + qwy);
-	rotation[2][1] = 2.0f * (qyz - qwx);
-	rotation[2][2] = 1.0f - 2.0f * (qxx +  qyy);
-
-	return rotation;
-}
-
 // stages the model for rasterization, meaning it creates tile fragments for each tile the splat overlaps, and adds it to the staging buffer.
 // Much of the math here is from https://github.com/mkkellogg/GaussianSplats3D
 extern "C" __global__
@@ -300,9 +273,7 @@ void kernel_stageSplats(
 	// // __half qz = __half(quat.z);
 	// // __half qw = __half(quat.w);
 
-	// // mat3 rotation = quatToMat3(qx, qy, qz, qw);
-	mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
-	// mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, float(qw) / 127.0f);
+	mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 
 	mat3 scale = mat3(1.0f);
 	scale[0][0] = model.scale[splatIndex].x;
