@@ -720,6 +720,8 @@ void SplatEditor::makeToolbar(){
 
 			ImGui::SameLine();
 			ImGui::Checkbox("SoA", &editor->settings.renderSoA);
+			ImGui::SameLine();
+			ImGui::Checkbox("Bandwidth", &editor->settings.renderBandwidth);
 
 			endSection();
 		}

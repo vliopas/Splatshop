@@ -619,6 +619,260 @@ void drawsplats_3dgs_concurrent(
 	}
 	
 }
+
+void drawsplats_3dgs_concurrent_bandwidth(
+	Scene* scene, 
+	vector<ConcurrentTarget> targets
+){
+	// Memory bandwidth performance study with simplified code paths, e.g. single target, no solid mode, etc.
+
+	auto target = targets[0];
+
+	auto editor = SplatEditor::instance;
+	auto& settings = editor->settings;
+	auto& state = editor->state;
+
+	static CUevent event_start = 0;
+	static CUevent event_end = 0;
+	static double t_start;
+	static bool initialized = false;
+	static CudaModularProgram* prog_render_bandwidth = nullptr;
+	static shared_ptr<CudaVirtualMemory> virt_fluff_in = CURuntime::allocVirtual("bandwidth fluff in");
+	static shared_ptr<CudaVirtualMemory> virt_fluff_out = CURuntime::allocVirtual("bandwidth fluff out");
+
+	if(!initialized){
+		cuEventCreate(&event_start, CU_EVENT_DEFAULT);
+		cuEventCreate(&event_end, CU_EVENT_DEFAULT);
+		prog_render_bandwidth = new CudaModularProgram({"./src/gaussians_rendering_bandwidth.cu"});
+		
+		// up to 50 floats for 30M splats
+		virt_fluff_in->commit(30'000'000ll * 50ll * 4ll);
+		virt_fluff_out->commit(30'000'000ll * 50ll * 4ll);
+		cuMemsetD8(virt_fluff_in->cptr, 0, virt_fluff_in->comitted);
+
+		initialized = true;
+	}
+
+	if(Runtime::measureTimings){
+		cuCtxSynchronize();
+		t_start = now();
+		cuEventRecord(event_start, targets[0].mainstream);
+	}
+
+	// staging of splats needs a lot of memory, 
+	// so we still do this part sequentially, one target after the other
+	{
+
+		cuMemsetD32Async(target.cptr_numVisibleSplats  , 0, 1, target.mainstream);
+		cuMemsetD32Async(target.cptr_numFragments      , 0, 1, target.mainstream);
+
+		// hm, can we know how much we need before we need it? 
+		uint32_t numPotentiallyVisibleSplats = 0;
+		scene->process<SNSplats>([&](SNSplats* node) {
+			if(!node->visible) return;
+			numPotentiallyVisibleSplats += node->dmng.data.count;
+		});
+		target.virt_stagedata->commit(sizeof(StageData) * numPotentiallyVisibleSplats);
+		target.virt_depth->commit(sizeof(float) * numPotentiallyVisibleSplats);
+		target.virt_ordering_splatdepth->commit(sizeof(uint32_t) * numPotentiallyVisibleSplats);
+		target.virt_numTilefragments_splatwise->commit(sizeof(uint32_t) * numPotentiallyVisibleSplats);
+
+		scene->process<SNSplats>([&](SNSplats* node) {
+			if(!node->visible) return;
+			if(node->dmng.data.count == 0) return;
+
+			node->dmng.data.transform = node->transform_global;
+
+			mat4 world = scene->world->transform;
+			GaussianData data = node->dmng.data;
+
+			ColorCorrection colorCorrection;
+			if(node->selected){
+				colorCorrection = settings.colorCorrection;
+			}
+			
+			void* args[] = {
+				// in
+				&editor->launchArgs,
+				&target, 
+				&colorCorrection, 
+				&node->dmng.data, 
+				&virt_fluff_in->cptr,
+
+				// out
+				&target.cptr_numVisibleSplats,
+				&target.cptr_numFragments, 
+				&target.virt_numTilefragments_splatwise->cptr,
+				&target.virt_depth->cptr,
+				&target.virt_stagedata->cptr,
+				&target.virt_ordering_splatdepth->cptr,
+				&virt_fluff_out->cptr,
+			};
+			prog_render_bandwidth->launch("kernel_stageSplats", args, data.count, target.mainstream);
+		});
+
+		
+
+	}
+	// cuCtxSynchronize();
+
+	// Retrieve number of staged/visible splats and tile-fragments
+	int i = 0;
+	for(auto& target : targets){
+
+		// cuMemcpyDtoHAsync target must be page-locked.
+		// Apparently local variables count as page-locked memory?
+		uint32_t numVisibleSplats;
+		uint32_t numFragments;
+		CURuntime::check(cuMemcpyDtoHAsync(&numVisibleSplats, target.cptr_numVisibleSplats, 4, target.mainstream));
+		CURuntime::check(cuMemcpyDtoHAsync(&numFragments, target.cptr_numFragments, 4, target.mainstream));
+
+		cuStreamSynchronize(target.mainstream);
+		cuStreamSynchronize(target.sidestream);
+
+		Runtime::numVisibleSplats += numVisibleSplats;
+		Runtime::numVisibleFragments += numFragments;
+
+		target.numFragments = numFragments;
+		target.numVisibleSplats = numVisibleSplats;
+
+		{
+			string label = "numSplats";
+			string value = format(getSaneLocale(), "{:L}", numVisibleSplats);
+			Runtime::debugValueList.push_back({label, value});
+		}
+		{
+			string label = "numFragments";
+			string value = format(getSaneLocale(), "{:L}", numFragments);
+			Runtime::debugValueList.push_back({label, value});
+		}
+		
+	}
+
+	for(auto target : targets){
+
+		target.virt_tileIDs->commit(4 * target.numFragments);
+		target.virt_numTilefragments_splatwise_ordered->commit(4 * target.numFragments);
+		target.virt_indices->commit(4 * target.numFragments);
+
+		// Unfortunately we can't sort simultaneously, since both use the same alternative sort buffers
+		cuCtxSynchronize();
+
+		// sort visible splats by depth (or rather, compute the order without applying it).
+		// We have to provide radix-sort with intermediate memory for sorting, which must be separate for each concurrent target.
+		GPUSorting::sort_32bit_keyvalue(target.numVisibleSplats, target.virt_depth->cptr, target.virt_ordering_splatdepth->cptr, 0, 0,target.mainstream);
+
+		// Apply the ordering. Necessary because we don't have 64 bit sorting and do it in a 32bit sort, followed by another 16 bit sort.
+		// The follow-up 16 bit sort needs its keys to be sorted by the preceeding 32 bit sort.
+		void* argsApply[] = {
+			&target.virt_numTilefragments_splatwise->cptr, 
+			&target.virt_numTilefragments_splatwise_ordered->cptr, 
+			&target.virt_ordering_splatdepth->cptr, 
+			&target.numVisibleSplats
+		};
+		editor->prog_gaussians_rendering->launch("kernel_applyOrdering_u32", argsApply, target.numVisibleSplats, target.mainstream);
+
+		// Compute prefix sum of tile fragment counters.
+		GPUPrefixSumsCS::dispatch(target.numVisibleSplats, target.virt_numTilefragments_splatwise_ordered->cptr, target.mainstream);
+	}
+
+	// Create tile fragment arrays concurrently
+	for(auto target : targets){
+		// The prefix sum is stored in-place in cptr_numTilefragments_ordered
+		CUdeviceptr cptr_prefixsum = target.virt_numTilefragments_splatwise_ordered->cptr;
+
+		// now create the tile fragment (StageData) array
+		void* argsCreatefragmentArray[] = {
+			// input
+			&editor->launchArgs, &target,
+			&target.virt_ordering_splatdepth->cptr, &target.numVisibleSplats, &target.virt_stagedata->cptr, 
+			&cptr_prefixsum,& target.cptr_numFragments,
+			// output
+			&target.virt_tileIDs->cptr, &target.virt_indices->cptr,
+		};
+
+		editor->prog_gaussians_rendering->launch("kernel_createTilefragmentArray", argsCreatefragmentArray, target.numVisibleSplats, target.mainstream);
+	}
+
+	// But sort one target after the other because both use the same alternative sort buffers
+	for(auto target : targets){
+		cuCtxSynchronize();
+		// The prefix sum is stored in-place in cptr_numTilefragments_ordered
+		CUdeviceptr cptr_prefixsum = target.virt_numTilefragments_splatwise_ordered->cptr;
+		GPUSorting::sort_16bitkey_32bitvalue(target.numFragments, target.virt_tileIDs->cptr, target.virt_indices->cptr, target.mainstream);
+	}
+
+	for(auto target : targets){
+
+		int width   = target.target.width;
+		int height  = target.target.height;
+		int tiles_x = int(width + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
+		int tiles_y = int(height + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
+		uint32_t numTiles = tiles_x * tiles_y;
+		int tileSize = TILE_SIZE_3DGS;
+
+		cuMemsetD8Async(target.cptr_tiles, 0, sizeof(Tile) * numTiles, target.mainstream);
+		editor->prog_gaussians_rendering->launch(
+			"kernel_computeTiles_method1", 
+			{&editor->launchArgs, &target, &target.virt_tileIDs->cptr, &target.numFragments, &tileSize, &target.cptr_tiles}, 
+			target.numFragments, target.mainstream
+		);
+
+		cuEventRecord(target.cu_tilesComputed, target.mainstream);
+
+		// both streams use the computed tiles, so make sure the sidestream also waits until the mainstream computed the tiles.
+		cuStreamWaitEvent(target.mainstream, target.cu_tilesComputed, 0);
+		cuStreamWaitEvent(target.sidestream, target.cu_tilesComputed, 0);
+
+		if(editor->settings.requestDebugDump){ 
+			dump_tile(target, numTiles);
+		}
+
+		if(target.numFragments > 0){
+
+			uint32_t pointsInTileThreshold = 0;
+
+			void* args_rendering[] = {
+				&editor->launchArgs, &target.target, &target.cptr_tiles, &target.virt_indices->cptr, 
+				&target.virt_stagedata->cptr, &pointsInTileThreshold
+			};
+
+			if(settings.showSolid){
+				pointsInTileThreshold = 1'000'000;
+				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_solid", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
+			}else if(settings.enableSplatCulling){
+				pointsInTileThreshold = 10'000;
+				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_with_discard", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.mainstream});
+				editor->prog_gaussians_rendering->launch("kernel_render_gaussians", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
+			}else{
+				pointsInTileThreshold = 1'000'000;
+				editor->prog_gaussians_rendering->launch("kernel_render_gaussians", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
+			}
+		}
+	}
+
+	// wait for all streams
+	for(auto target : targets){
+		cuStreamSynchronize(target.mainstream);
+		cuStreamSynchronize(target.sidestream);
+	}
+	
+	if(Runtime::measureTimings){
+		cuEventRecord(event_end, 0);
+
+		cuCtxSynchronize();
+
+		double seconds = now() - t_start;
+
+		float duration;
+		cuEventElapsedTime(&duration, event_start, event_end);
+
+		Runtime::timings.add("[draw splats (host)]", seconds * 1000.0f);
+		Runtime::timings.add("[draw splats (device)]", duration);
+	}
+	
+}
+
 void drawsplats_3dgs_concurrent_soa(
 	Scene* scene, 
 	vector<ConcurrentTarget> targets
@@ -1157,6 +1411,8 @@ void SplatEditor::draw(Scene* scene, vector<RenderTarget> targets){
 
 		if(settings.renderSoA){
 			drawsplats_3dgs_concurrent_soa(scene, concurrentTargets);
+		}else if(settings.renderBandwidth){
+			drawsplats_3dgs_concurrent_bandwidth(scene, concurrentTargets);
 		}else{
 			drawsplats_3dgs_concurrent(scene, concurrentTargets);
 		}
