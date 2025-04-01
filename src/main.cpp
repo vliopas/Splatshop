@@ -56,26 +56,26 @@ void initScene() {
 	// string path = "F:/SplatEditor/city_gaussians_mc_aerial_c36.ply";
 	// string path = "F:/SplatEditor/splatmodels.json";
 
-	if(fs::exists(path)){
-		if(iEndsWith(path, ".json")){
-			SplatsyFilesLoader::load(path, editor->scene, *Runtime::controls);
-		}else if(iEndsWith(path, ".ply")){
-			auto splats = GSPlyLoader::load(path);
-			shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
-			editor->scene.world->children.push_back(node);
-		}
+	// if(fs::exists(path)){
+	// 	if(iEndsWith(path, ".json")){
+	// 		SplatsyFilesLoader::load(path, editor->scene, *Runtime::controls);
+	// 	}else if(iEndsWith(path, ".ply")){
+	// 		auto splats = GSPlyLoader::load(path);
+	// 		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+	// 		editor->scene.world->children.push_back(node);
+	// 	}
 
-		Runtime::controls->yaw    = 3.155;
-		Runtime::controls->pitch  = -0.220;
-		Runtime::controls->radius = 3.877;
-		Runtime::controls->target = { 0.353, 0.518, 1.240, };
-	}else{
-		println("Could not find file {}", path);
-	}
+	// 	Runtime::controls->yaw    = 3.155;
+	// 	Runtime::controls->pitch  = -0.220;
+	// 	Runtime::controls->radius = 3.877;
+	// 	Runtime::controls->target = { 0.353, 0.518, 1.240, };
+	// }else{
+	// 	println("Could not find file {}", path);
+	// }
 
 	
 	// {// Lot's of gardens
-	// 	string path = "./splatmodels_garden/splats/garden.ply.ply";
+	// 	string path = "./garden.ply";
 
 	// 	for(int i = 0; i < 5; i++)
 	// 	for(int j = 0; j < 5; j++)
@@ -98,38 +98,38 @@ void initScene() {
 	
 
 
-	// { // CITY GAUSSIANS
-	// 	// string path = "F:/CityGaussians/mc_aerial_c36/point_cloud/iteration_30000/point_cloud.ply";
-	// 	string path = "E:/resources/splats/city_gaussians_mc_aerial_c36.ply";
-	// 	auto splats = GSPlyLoader::load(path);
+	{ // CITY GAUSSIANS
+		// string path = "F:/CityGaussians/mc_aerial_c36/point_cloud/iteration_30000/point_cloud.ply";
+		string path = "E:/resources/splats/city_gaussians_mc_aerial_c36.ply";
+		auto splats = GSPlyLoader::load(path);
 
-	// 	mat4 world = {
-	// 		-0.117,     -0.009,      0.000,      0.000,
-	// 		 0.009,     -0.117,      0.000,      0.000,
-	// 		 0.000,      0.000,      0.118,      0.000,
-	// 		-0.234,     -0.243,      0.166,      1.000
-	// 	};
+		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
 
-	// 	shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+		mat4 world = {
+			-0.117,     -0.009,      0.000,      0.000,
+			 0.009,     -0.117,      0.000,      0.000,
+			 0.000,      0.000,      0.118,      0.000,
+			-0.234,     -0.243,      0.166,      1.000
+		};
 
-	// 	node->transform = world * mat4{
-	// 		1.000,      0.000,      0.000,      0.000,
-	// 		0.000,      1.000,      0.000,      0.000,
-	// 		0.000,      0.000,      1.000,      0.000,
-	// 		5.871,     -7.894,      0.517,      1.000
-	// 	};
+		node->transform = world * mat4{
+			1.000,      0.000,      0.000,      0.000,
+			0.000,      1.000,      0.000,      0.000,
+			0.000,      0.000,      1.000,      0.000,
+			5.871,     -7.894,      0.517,      1.000
+		};
 
-	// 	editor->scene.world->children.push_back(node);
+		editor->scene.world->children.push_back(node);
 
 		
 
-	// 	// position: -3.8790769445903313, 12.585053772306223, -8.25656827876122 
-	// 	Runtime::controls->yaw    = -2.925;
-	// 	Runtime::controls->pitch  = -0.583;
-	// 	Runtime::controls->radius = 15.792;
-	// 	Runtime::controls->target = { -0.485, -0.294, 0.228, };
+		// position: -3.8790769445903313, 12.585053772306223, -8.25656827876122 
+		Runtime::controls->yaw    = -2.925;
+		Runtime::controls->pitch  = -0.583;
+		Runtime::controls->radius = 15.792;
+		Runtime::controls->target = { -0.485, -0.294, 0.228, };
 
-	// }
+	}
 
 
 	

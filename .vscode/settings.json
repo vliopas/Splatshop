@@ -8,6 +8,11 @@
 		"iterator": "cpp",
 		"xhash": "cpp",
 		"xtree": "cpp",
-		"chrono": "cpp"
+		"chrono": "cpp",
+		"algorithm": "cpp",
+		"execution": "cpp",
+		"locale": "cpp",
+		"optional": "cpp",
+		"ranges": "cpp"
 	}
 }

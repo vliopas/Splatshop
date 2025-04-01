@@ -554,18 +554,12 @@ void kernel_rectselect(
 	}
 }
 
-// Apply things like brushing and transformation in VR
 extern "C" __global__
 void kernel_select_vr(
 	CommonLaunchArgs args, 
 	GaussianData model,
 	bool isTriggerPressed,
 	mat4 controllerPose,
-	// VrController left,
-	// VrController right,
-	// vec3 right_delta,
-	// quat right_q_delta,
-	// mat4 transform_delta,
 	uint32_t* changedmask
 ){
 	auto grid = cg::this_grid();
@@ -586,13 +580,13 @@ void kernel_select_vr(
 	bool intersectionMode = BRUSH_INTERSECTION_CENTER;
 	intersectionMode = BRUSH_INTERSECTION_BORDER;
 
-	vec3 dscale;
-	quat rotation;
-	vec3 translation;
-	vec3 skew;
-	vec4 perspective;
-	glm::decompose(model.transform, dscale, rotation, translation, skew, perspective);
-	rotation = glm::conjugate(rotation);
+	vec3 d_scale;
+	quat d_rotation;
+	vec3 d_translation;
+	vec3 d_skew;
+	vec4 d_perspective;
+	glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+	d_rotation = glm::conjugate(d_rotation);
 
 	mat4 mTranslate = translate(vec3{0.0f, 0.1f, 0.0f});
 	mat4 mScale = scale(vec3{0.1f, 0.1f, 0.1f});
@@ -633,7 +627,18 @@ void kernel_select_vr(
 		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
-		vec3 scale = model.scale[index] * dscale;
+		vec3 scale = model.scale[index];
+
+		{ // apply the splat model's transformation
+			glm::quat q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+			q = d_rotation * q;
+
+			rotation = glm::mat3_cast(q);
+			rot4 = mat4(rotation);
+			rot4[3][3] = 1.0f;
+
+			scale = scale * d_scale;
+		}
 
 		vec3 dx = /** world * **/ rot4 * vec4{scale.x, 0.0f, 0.0f, 0.0f};
 		vec3 dy = /** world * **/ rot4 * vec4{0.0f, scale.y, 0.0f, 0.0f};
@@ -748,39 +753,70 @@ void kernel_select_sphere(
 
 	bool intersectionMode = BRUSH_INTERSECTION_CENTER;
 	intersectionMode = BRUSH_INTERSECTION_BORDER;
+	intersectionMode = BRUSH_INTERSECTION_CENTER;
 
-	if(intersectionMode = BRUSH_INTERSECTION_CENTER){
+	// spherePos = {0.0f, 0.0f, 0.0f};
+	// radius = 1.0f;
+
+	if(intersectionMode == BRUSH_INTERSECTION_CENTER){
 		vec3 pos = model.position[index];
 		pos = vec3(model.transform * vec4{pos.x, pos.y, pos.z, 1.0f});
 
 		float d = length(spherePos - pos);
 
-		radius = 0.5f;
+		uint32_t flags = model.flags[index];
 
 		if(d < radius){
-			model.flags[index] = model.flags[index] | FLAGS_HIGHLIGHTED;
+			model.flags[index] = flags | FLAGS_HIGHLIGHTED;
 
 			if(args.mouseEvents.isLeftDown){
-				bool alreadySelected = model.flags[index] & FLAGS_SELECTED;
+				bool alreadySelected = flags & FLAGS_SELECTED;
 
 				if(!alreadySelected){
-					model.flags[index] = model.flags[index] | FLAGS_SELECTED;
+					model.flags[index] = flags | FLAGS_SELECTED;
 
 					if(splatmask){
 						setBit(splatmask, index);
 					}
 				}
 			}
+		}else{
+			uint32_t newFlags = flags & ~FLAGS_HIGHLIGHTED;
+
+			if(flags != newFlags){
+				model.flags[index] = newFlags;
+			}
 		}
-	}else if(intersectionMode = BRUSH_INTERSECTION_BORDER){
+	}else if(intersectionMode == BRUSH_INTERSECTION_BORDER){
 		vec3 pos = model.position[index];
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
 
 		vec4 quat = model.quaternion[index];
 		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
+		// mat4 rot4;
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
 		vec3 scale = model.scale[index];
+
+		{ // apply the splat model's transformation
+
+			vec3 d_scale;
+			glm::quat d_rotation;
+			vec3 d_translation;
+			vec3 d_skew;
+			vec4 d_perspective;
+			glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+			d_rotation = glm::conjugate(d_rotation);
+
+			// glm::quat q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+			// q = d_rotation * q;
+
+			// rotation = glm::mat3_cast(q);
+			// rot4 = mat4(rotation);
+			// rot4[3][3] = 1.0f;
+
+			scale = scale * d_scale;
+		}
 
 		vec3 dx = /** world * **/ rot4 * vec4{scale.x, 0.0f, 0.0f, 0.0f};
 		vec3 dy = /** world * **/ rot4 * vec4{0.0f, scale.y, 0.0f, 0.0f};

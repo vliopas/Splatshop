@@ -82,3 +82,5 @@ gaussians.ply
 gaussians_w_pca.ply
 splatmodels_3dgs_and_perspcorrect/
 splatmodels_garden/
+garden.ply
+splatmodels_citygaussians_cleaned/
