@@ -186,6 +186,8 @@ struct StageData {
 	float depth;
 	// uint32_t padding0;
 	// uint32_t padding1;
+
+	// float padding[16];
 };
 #endif
 struct StageData_perspectivecorrect {

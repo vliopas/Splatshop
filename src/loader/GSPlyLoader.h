@@ -266,9 +266,10 @@ struct GSPlyLoader{
 					float g = buffer.get<float>(srcOffset + header.OFFSETS_DC + 4llu);
 					float b = buffer.get<float>(srcOffset + header.OFFSETS_DC + 8llu);
 
-					r = clamp(0.5 + 0.28209479177387814 * r, 0.0, 1.0);
-					g = clamp(0.5 + 0.28209479177387814 * g, 0.0, 1.0);
-					b = clamp(0.5 + 0.28209479177387814 * b, 0.0, 1.0);
+					float CO = 0.28209479177387814; // spherical harmonics coefficient
+					r = clamp(0.5 + CO * r, 0.0, 1.0);
+					g = clamp(0.5 + CO * g, 0.0, 1.0);
+					b = clamp(0.5 + CO * b, 0.0, 1.0);
 
 					splats->color->set<uint16_t>(clamp(65536.0f * r, 0.0f, 65535.0f), 8llu * i + 0llu);
 					splats->color->set<uint16_t>(clamp(65536.0f * g, 0.0f, 65535.0f), 8llu * i + 2llu);
@@ -276,11 +277,27 @@ struct GSPlyLoader{
 				}
 
 				if(splats->SHs){
-					memcpy(
-						splats->SHs->ptr + numSHBytes * i, 
-						buffer.ptr + srcOffset + header.OFFSETS_SHs, 
-						numSHBytes
-					);
+					// SHs are stored per splat but in [rrr..][ggg..][bbb..] fashion. 
+					// We need to rearange to [rgb][rgb]...
+
+					for(int j = 0; j < header.numSHCoefficients / 3; j++){
+
+						int64_t numVec3s = header.numSHCoefficients / 3;
+
+						float a = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (0 * numVec3s + j));
+						float b = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (1 * numVec3s + j));
+						float c = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (2 * numVec3s + j));
+
+						splats->SHs->set<float>(a, numSHBytes * i + 12 * j + 0);
+						splats->SHs->set<float>(b, numSHBytes * i + 12 * j + 4);
+						splats->SHs->set<float>(c, numSHBytes * i + 12 * j + 8);
+					}
+
+					// memcpy(
+					// 	splats->SHs->ptr + numSHBytes * i, 
+					// 	buffer.ptr + srcOffset + header.OFFSETS_SHs, 
+					// 	numSHBytes
+					// );
 				}
 
 				float opacity = buffer.get<float>(srcOffset + header.OFFSETS_OPACITY);

@@ -213,12 +213,6 @@ vec3 getHarmonics(
 		-1.7701307697799304f,
 		 0.6258357354491761f,
 	};
-	
-	vec3 result = {0.0f, 0.0f, 0.0f};
-	result = result -
-		C1 * camdir.y * sh[0] + 
-		C1 * camdir.z * sh[1] - 
-		C1 * camdir.x * sh[2];
 
 	float xx = camdir.x * camdir.x;
 	float yy = camdir.y * camdir.y;
@@ -226,6 +220,15 @@ vec3 getHarmonics(
 	float xy = camdir.x * camdir.y; 
 	float yz = camdir.y * camdir.z; 
 	float xz = camdir.x * camdir.z;
+
+	vec3 result = {0.0f, 0.0f, 0.0f};
+
+	if(degree > 0){
+		result = result -
+			C1 * camdir.y * sh[0] + 
+			C1 * camdir.z * sh[1] - 
+			C1 * camdir.x * sh[2];
+	}
 
 	if(degree > 1){
 		result = result +
@@ -283,7 +286,7 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 	int tileFrags = 0;
 
 	// float diag = 22.627416997969522f;  // sqrt(16.0f * 16.0f + 16.0f * 16.0f);
-	float tileRadius = 11.313708498984761f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
+	float tileRadius = 11.313708498984761f + 0.0f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
 	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
 	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
 	{
@@ -363,14 +366,29 @@ void kernel_stageSplats(
 	vec4 color = model.color[splatIndex].normalized();
 
 	// WIP
-	// if(model.shDegree > 0){
-	// 	int64_t offset = splatIndex * model.numSHCoefficients;
-	// 	vec3* sh = (vec3*)(model.sphericalHarmonics + offset);
-	// 	vec3 camPos = target.view * vec4(0.0f, 0.0f, 0.0f, 1.0f);
-	// 	vec3 camdir = normalize(vec3(worldPos) - camPos);
+	// if(false)
+	// if(splatIndex % 10 == args.uniforms.frameCount % 10)
+	if(model.shDegree > 0 ){
+		// if(splatIndex == 0) printf("model.numSHCoefficients: %d \n", model.numSHCoefficients);
+		// int64_t offset = splatIndex * 45;
+		int64_t offset = splatIndex * model.numSHCoefficients;
+		vec3* sh = (vec3*)(model.sphericalHarmonics + offset);
+		vec3 camPos = target.view * vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		vec3 camdir = normalize(vec3(worldPos) - camPos);
+		camdir = vec3(((model.transform)) * vec4(camdir, 0.0f));
+		camdir = vec3(camdir.x, -camdir.z, camdir.y);
+
+		vec4 harmonics = vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, sh), 0.0f);
+		// color.r = 0.0f;
+		// color.g = 0.0f;
+		// color.b = 0.0f;
+		// color = color + 5.0f * harmonics;
+		color = color + harmonics;
+
 		
-	// 	color = color + vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, sh), 0.0f);
-	// }
+
+		color = glm::max(color, 0.0f);
+	}
 
 
 	vec4 quat = model.quaternion[splatIndex];
