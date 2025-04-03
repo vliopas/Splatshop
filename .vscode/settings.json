@@ -13,6 +13,7 @@
 		"execution": "cpp",
 		"locale": "cpp",
 		"optional": "cpp",
-		"ranges": "cpp"
+		"ranges": "cpp",
+		"cmath": "cpp"
 	}
 }

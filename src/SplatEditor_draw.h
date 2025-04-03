@@ -894,7 +894,7 @@ void drawsplats_3dgs_concurrent_fragintersections(
 	if(!initialized){
 		cuEventCreate(&event_start, CU_EVENT_DEFAULT);
 		cuEventCreate(&event_end, CU_EVENT_DEFAULT);
-		prog_render_fragintersections = new CudaModularProgram({"./src/gaussians_rendering_fragintersections.cu"});
+		prog_render_fragintersections = new CudaModularProgram({"./src/gaussians_rendering_fragintersection_3dgs.cu"});
 
 		initialized = true;
 	}

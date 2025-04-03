@@ -250,22 +250,20 @@ vec3 getHarmonics(
 template <typename Function>
 void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
 
-	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
-	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
+	// Use 3DGS-style bounding quad
+	float maxRadius = max(length(basisVector1), length(basisVector2));
 
 	ivec2 tile_start = {
-		(splatCoord.x - quadHalfWidth) / TILE_SIZE_3DGS,
-		(splatCoord.y - quadHalfHeight) / TILE_SIZE_3DGS};
+		(splatCoord.x - maxRadius) / TILE_SIZE_3DGS,
+		(splatCoord.y - maxRadius) / TILE_SIZE_3DGS,
+	};
 	ivec2 tile_end = {
-		(splatCoord.x + quadHalfWidth) / TILE_SIZE_3DGS,
-		(splatCoord.y + quadHalfHeight) / TILE_SIZE_3DGS};
+		(splatCoord.x + maxRadius) / TILE_SIZE_3DGS,
+		(splatCoord.y + maxRadius) / TILE_SIZE_3DGS,
+	};
 
 	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
 	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
-	vec2 tileCoord = {
-		splatCoord.x / TILE_SIZE_3DGS,
-		splatCoord.y / TILE_SIZE_3DGS
-	};
 
 	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
 	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
@@ -276,26 +274,10 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 	tile_start.y = max(tile_start.y, 0);
 	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
 
-	// float diag = 22.627416997969522f;  // sqrt(16.0f * 16.0f + 16.0f * 16.0f);
-	float tileRadius = 11.313708498984761f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
 	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
 	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
 	{
-		vec2 tilePos = {tile_x * 16.0f + 8.0f, tile_y * 16.0f + 8.0f}; 
-
-		bool intersectsTile = intersection_circle_splat(
-			tilePos, tileRadius, 
-			splatCoord, 
-			basisVector1, 
-			basisVector2
-		);
-
-		// for this evaluation, accept all fragments inside the splat's bounding box.
-		intersectsTile = true;
-
-		if(intersectsTile){
-			f(tile_x, tile_y);
-		}
+		f(tile_x, tile_y);
 	}
 }
 
