@@ -11,6 +11,9 @@
 #define GLM_FORCE_CUDA
 #define CUDA_VERSION 12000
 
+// #define INTERSECTION_3DGS
+#define INTERSECTION_TIGHTBB
+
 namespace std{
 	using size_t = ::size_t;
 };
@@ -107,7 +110,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 	return __half2{x, y};
 }
 
-#if defined(STAGEDATA_16BIT)
+#if defined(STAGEDATA_16BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -136,7 +139,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = hdepth;
 	}
 
-#elif defined(STAGEDATA_20BIT)
+#elif defined(STAGEDATA_20BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -152,7 +155,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = stagedata.depth;
 	}
 
-#elif defined(STAGEDATA_24BIT)
+#elif defined(STAGEDATA_24BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -248,7 +251,7 @@ vec3 getHarmonics(
 
 // We need the same iteration logic for "touched" tiles in multiple kernels. 
 template <typename Function>
-void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+void forEachTouchedTile_3dgs(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
 
 	// Use 3DGS-style bounding quad
 	float maxRadius = max(length(basisVector1), length(basisVector2));
@@ -261,6 +264,38 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 		(splatCoord.x + maxRadius) / TILE_SIZE_3DGS,
 		(splatCoord.y + maxRadius) / TILE_SIZE_3DGS,
 	};
+
+	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
+	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
+
+	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
+	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
+
+	tile_start.x = max(tile_start.x, 0);
+	tile_end.x = min(tile_end.x, int(tiles_x) - 1);
+
+	tile_start.y = max(tile_start.y, 0);
+	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
+
+	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
+	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
+	{
+		f(tile_x, tile_y);
+	}
+}
+
+template <typename Function>
+void forEachTouchedTile_tightBB(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+
+	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
+	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
+
+	ivec2 tile_start = {
+		(splatCoord.x - quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y - quadHalfHeight) / TILE_SIZE_3DGS};
+	ivec2 tile_end = {
+		(splatCoord.x + quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y + quadHalfHeight) / TILE_SIZE_3DGS};
 
 	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
 	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
@@ -563,9 +598,15 @@ void kernel_stageSplats(
 	// Count tile fragments that each splat produces
 	uint32_t tileFrags = 0;
 
-	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
-		tileFrags++;
-	});
+	#if defined(INTERSECTION_3DGS)
+		forEachTouchedTile_3dgs(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+			tileFrags++;
+		});
+	#elif defined(INTERSECTION_TIGHTBB)
+		forEachTouchedTile_tightBB(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+			tileFrags++;
+		});
+	#endif
 
 	numTilefragments_splatwise[visibleSplatID] = tileFrags;
 	atomicAdd(numTilefragments, tileFrags);
@@ -813,14 +854,25 @@ void kernel_createTilefragmentArray(
 
 	uint32_t fragmentOffset = prefixsum[index];
 	
-	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
-		uint32_t tileID = tile_x + tile_y * tiles_x;
-		
-		tileIDs[fragmentOffset] = tileID;
-		splatIDs[fragmentOffset] = order;
-		
-		fragmentOffset++;
-	});
+	#if defined(INTERSECTION_3DGS)
+		forEachTouchedTile_3dgs(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+			uint32_t tileID = tile_x + tile_y * tiles_x;
+			
+			tileIDs[fragmentOffset] = tileID;
+			splatIDs[fragmentOffset] = order;
+			
+			fragmentOffset++;
+		});
+	#elif defined(INTERSECTION_TIGHTBB)
+		forEachTouchedTile_tightBB(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+			uint32_t tileID = tile_x + tile_y * tiles_x;
+			
+			tileIDs[fragmentOffset] = tileID;
+			splatIDs[fragmentOffset] = order;
+			
+			fragmentOffset++;
+		});
+	#endif
 	
 }
 

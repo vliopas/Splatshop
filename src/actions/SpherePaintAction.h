@@ -416,7 +416,7 @@ struct SpherePaintAction : public InputAction{
 			cuEventElapsedTime(&duration_device, ce_start, ce_end);
 
 			if(duration_device > 0.005f){
-				println("PaintUndoAction::update() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
+				println("SpherePaintAction::update() timings: host: {:.3f} ms, device: {:.3f} ms", duration_host, duration_device);
 			}
 		}
 

@@ -14,6 +14,7 @@ struct GaussianDataManager{
 	shared_ptr<CudaVirtualMemory> vm_scale               = nullptr;
 	shared_ptr<CudaVirtualMemory> vm_quaternion          = nullptr;
 	shared_ptr<CudaVirtualMemory> vm_color               = nullptr;
+	shared_ptr<CudaVirtualMemory> vm_color_resolved      = nullptr;
 	shared_ptr<CudaVirtualMemory> vm_depth               = nullptr;
 	shared_ptr<CudaVirtualMemory> vm_flags               = nullptr;
 	shared_ptr<CudaVirtualMemory> vm_sphericalHarmonics  = nullptr;
@@ -28,6 +29,7 @@ struct GaussianDataManager{
 		vm_scale               = CURuntime::allocVirtual(format("[{}] scale",      name)); 
 		vm_quaternion          = CURuntime::allocVirtual(format("[{}] quaternion", name)); 
 		vm_color               = CURuntime::allocVirtual(format("[{}] color",      name)); 
+		vm_color_resolved      = CURuntime::allocVirtual(format("[{}] color resolved",      name)); 
 		vm_depth               = CURuntime::allocVirtual(format("[{}] depth",      name)); 
 		vm_flags               = CURuntime::allocVirtual(format("[{}] flags",      name)); 
 		vm_sphericalHarmonics  = CURuntime::allocVirtual(format("[{}] spherical harmonics",name)); 
@@ -38,6 +40,7 @@ struct GaussianDataManager{
 		data.scale              = (decltype(data.scale))       vm_scale->cptr;
 		data.quaternion         = (decltype(data.quaternion))  vm_quaternion->cptr;
 		data.color              = (decltype(data.color))       vm_color->cptr;
+		data.color_resolved     = (decltype(data.color_resolved))   vm_color_resolved->cptr;
 		data.depth              = (decltype(data.depth))       vm_depth->cptr;
 		data.flags              = (decltype(data.flags))       vm_flags->cptr;
 		data.sphericalHarmonics = (decltype(data.sphericalHarmonics))       vm_sphericalHarmonics->cptr;
@@ -57,6 +60,7 @@ struct GaussianDataManager{
 		CURuntime::free(vm_scale);
 		CURuntime::free(vm_quaternion);
 		CURuntime::free(vm_color);
+		CURuntime::free(vm_color_resolved);
 		CURuntime::free(vm_depth);
 		CURuntime::free(vm_flags);
 		CURuntime::free(vm_sphericalHarmonics);
@@ -67,6 +71,7 @@ struct GaussianDataManager{
 		vm_scale               = nullptr;
 		vm_quaternion          = nullptr;
 		vm_color               = nullptr;
+		vm_color_resolved      = nullptr;
 		vm_depth               = nullptr;
 		vm_flags               = nullptr;
 		vm_sphericalHarmonics  = nullptr;
@@ -82,6 +87,7 @@ struct GaussianDataManager{
 		vm_scale               ->commit(sizeof(*data.scale     ) * numSplats, true);
 		vm_quaternion          ->commit(sizeof(*data.quaternion) * numSplats, true);
 		vm_color               ->commit(sizeof(*data.color     ) * numSplats, true);
+		vm_color_resolved      ->commit(sizeof(*data.color_resolved) * numSplats, true);
 		vm_depth               ->commit(sizeof(*data.depth     ) * numSplats, true);
 		vm_flags               ->commit(sizeof(*data.flags     ) * numSplats, true);
 		vm_sphericalHarmonics  ->commit(data.numSHCoefficients * sizeof(float) * numSplats, true);
@@ -95,6 +101,7 @@ struct GaussianDataManager{
 		data.scale               = (decltype(data.scale))                vm_scale->cptr;
 		data.quaternion          = (decltype(data.quaternion))           vm_quaternion->cptr;
 		data.color               = (decltype(data.color))                vm_color->cptr;
+		data.color_resolved      = (decltype(data.color_resolved))       vm_color_resolved->cptr;
 		data.depth               = (decltype(data.depth))                vm_depth->cptr;
 		data.flags               = (decltype(data.flags))                vm_flags->cptr;
 		data.sphericalHarmonics  = (decltype(data.sphericalHarmonics))   vm_sphericalHarmonics->cptr;
@@ -109,6 +116,7 @@ struct GaussianDataManager{
 		usage += vm_scale->comitted;
 		usage += vm_quaternion->comitted;
 		usage += vm_color->comitted;
+		usage += vm_color_resolved->comitted;
 		usage += vm_depth->comitted;
 		usage += vm_flags->comitted;
 		usage += vm_sphericalHarmonics->comitted;

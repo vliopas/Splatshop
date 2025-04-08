@@ -159,8 +159,8 @@ struct GSPlyLoader{
 		println("numSHCoefficients: {}", header.numSHCoefficients);
 
 		// deactivate SHs
-		header.numSHCoefficients = 0;
-		header.shDegree = 0;
+		// header.numSHCoefficients = 0;
+		// header.shDegree = 0;
 
 		int64_t numSHBytes = header.numSHCoefficients * sizeof(float);
 

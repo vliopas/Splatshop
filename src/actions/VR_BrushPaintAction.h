@@ -161,14 +161,14 @@ struct VR_BrushPaintAction : public InputAction{
 
 		const float MIN_STEPDISTANCE = 3.0f;
 		// do a brush step every <stepdistance> meters
-		float brushRadius = 0.1f;
+		float brushRadius = settings.vr_brushSize;
 		float stepdistance = brushRadius * 0.1f;
 
 		static vec3 lastBrushPos = {0.0f, 0.0f, 0.0f};
 		static float accumulatedDistance = 0.0f;
 
-		mat4 mTranslate = translate(vec3{0.0f, 0.1f, 0.0f});
-		mat4 mScale = scale(vec3{0.1f, 0.1f, 0.1f});
+		mat4 mTranslate = translate(vec3{0.0f, settings.vr_brushSize, 0.0f});
+		mat4 mScale = scale(vec3{1.0f, 1.0f, 1.0f} * settings.vr_brushSize);
 		mat4 mRot = glm::rotate(-140.0f * 3.1415f / 180.0f, vec3{ 1.0f, 0.0f, 0.0f });
 		mat4 transform = mat4(ovr->flip * right.transform) * mRot * mTranslate * mScale;
 		vec3 brushPos = transform * vec4{0.0f, 0.0f, 0.0f, 1.0f};
@@ -239,8 +239,8 @@ struct VR_BrushPaintAction : public InputAction{
 		}
 
 		{ // Place Brush Cage
-			mat4 mTranslate = translate(vec3{0.0f, 0.1f, 0.0f});
-			mat4 mScale = scale(vec3{0.1f, 0.1f, 0.1f});
+			mat4 mTranslate = translate(vec3{0.0f, settings.vr_brushSize, 0.0f});
+			mat4 mScale = scale(vec3{1.0f, 1.0f, 1.0f} * settings.vr_brushSize);
 			mat4 mRot = glm::rotate(-140.0f * 3.1415f / 180.0f, vec3{ 1.0f, 0.0f, 0.0f });
 			mat4 transform_controller = mat4(flip * right.transform) * mRot * mTranslate * mScale;
 

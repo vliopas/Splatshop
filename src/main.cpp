@@ -84,7 +84,7 @@ void initScene() {
 	// 		auto splats = GSPlyLoader::load(path);
 	// 		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
 
-	// 		node->transform = translate(vec3{float(35.0f * i), float(30.0f * j), 0.0f});
+	// 		node->transform = translate(vec3{float(30.0f * i), float(25.0f * j), 0.0f});
 
 	// 		editor->scene.world->children.push_back(node);
 	// 	}

@@ -101,7 +101,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 	return __half2{x, y};
 }
 
-#if defined(STAGEDATA_16BIT)
+#if defined(STAGEDATA_16BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -130,7 +130,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = hdepth;
 	}
 
-#elif defined(STAGEDATA_20BIT)
+#elif defined(STAGEDATA_20BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -146,7 +146,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = stagedata.depth;
 	}
 
-#elif defined(STAGEDATA_24BIT)
+#elif defined(STAGEDATA_24BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);

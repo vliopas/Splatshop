@@ -152,13 +152,13 @@ struct ColorCorrection{
 
 // constexpr int STAGEDATA_BITS = 24;
 
-// #define STAGEDATA_16BIT
-// #define STAGEDATA_20BIT
-#define STAGEDATA_24BIT
+// #define STAGEDATA_16BYTE
+// #define STAGEDATA_20BYTE
+#define STAGEDATA_24BYTE
 
 // #define FRAGWISE_ORDERING
 
-#if defined(STAGEDATA_16BIT)
+#if defined(STAGEDATA_16BYTE)
 	struct StageData{
 		glm::i16vec2 basisvector1_encoded;
 		glm::i16vec2 imgPos_encoded;
@@ -167,7 +167,7 @@ struct ColorCorrection{
 		int16_t basisvector2_encoded;
 		int16_t depth_encoded;
 	};
-#elif defined(STAGEDATA_20BIT)
+#elif defined(STAGEDATA_20BYTE)
 	struct StageData{
 		glm::i16vec2 basisvector1_encoded;
 		glm::i16vec2 basisvector2_encoded;
@@ -176,7 +176,7 @@ struct ColorCorrection{
 		// uint32_t flags;
 		 float depth;
 	};
-#elif defined(STAGEDATA_24BIT)
+#elif defined(STAGEDATA_24BYTE)
 struct StageData {
 	glm::i16vec2 basisvector1_encoded;
 	glm::i16vec2 basisvector2_encoded;
@@ -184,10 +184,12 @@ struct StageData {
 	uint32_t color;
 	uint32_t flags;
 	float depth;
-	// uint32_t padding0;
-	// uint32_t padding1;
 
-	// float padding[16];
+	// // Padding to 64 byte
+	// float padding[10];
+
+	// // Padding to 80 byte
+	// float padding[14];
 };
 #endif
 struct StageData_perspectivecorrect {
@@ -378,6 +380,7 @@ struct GaussianData{
 	vec3* scale                = nullptr;
 	vec4* quaternion           = nullptr;
 	Color* color               = nullptr;
+	uint32_t* color_resolved   = nullptr;
 	float* sphericalHarmonics  = nullptr;
 
 	Cov3DElements* cov3d       = nullptr;

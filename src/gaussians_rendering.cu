@@ -111,7 +111,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 	return __half2{x, y};
 }
 
-#if defined(STAGEDATA_16BIT)
+#if defined(STAGEDATA_16BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -140,7 +140,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = hdepth;
 	}
 
-#elif defined(STAGEDATA_20BIT)
+#elif defined(STAGEDATA_20BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -156,7 +156,7 @@ __half2 decode_basisvector_i16vec2_half2(glm::i16vec2 encoded){
 		depth = stagedata.depth;
 	}
 
-#elif defined(STAGEDATA_24BIT)
+#elif defined(STAGEDATA_24BYTE)
 
 	void encode_stagedata(StageData& stagedata, vec2 a, vec2 b, float depth){
 		stagedata.basisvector1_encoded = encode_basisvector_i16vec2(a);
@@ -269,10 +269,6 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 
 	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
 	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
-	vec2 tileCoord = {
-		splatCoord.x / TILE_SIZE_3DGS,
-		splatCoord.y / TILE_SIZE_3DGS
-	};
 
 	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
 	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
@@ -282,8 +278,6 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 
 	tile_start.y = max(tile_start.y, 0);
 	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
-
-	int tileFrags = 0;
 
 	// float diag = 22.627416997969522f;  // sqrt(16.0f * 16.0f + 16.0f * 16.0f);
 	float tileRadius = 11.313708498984761f + 0.0f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
@@ -360,14 +354,16 @@ void kernel_stageSplats(
 	// if(grid.thread_rank() == 0) printf("%llu\n", uint64_t(model.flags));
 
 	if(ndc.w <= 0.0f) return;
-	if(ndc.x < -1.1f || ndc.x >  1.1f) return;
-	if(ndc.y < -1.1f || ndc.y >  1.1f) return;
+	// Early-Discard gaussians whose position is far outside the frustum 
+	if(ndc.x < -1.5f || ndc.x >  1.5f) return;
+	if(ndc.y < -1.5f || ndc.y >  1.5f) return;
 
 	vec4 color = model.color[splatIndex].normalized();
 
-	// WIP
+	// WIP: SHs not yet robust under model and splat transformations
+	constexpr int updateOverXFrames = 10;
+	if(splatIndex % updateOverXFrames == args.uniforms.frameCount % updateOverXFrames)
 	// if(false)
-	// if(splatIndex % 10 == args.uniforms.frameCount % 10)
 	if(model.shDegree > 0 ){
 		// if(splatIndex == 0) printf("model.numSHCoefficients: %d \n", model.numSHCoefficients);
 		// int64_t offset = splatIndex * 45;
@@ -383,11 +379,29 @@ void kernel_stageSplats(
 		// color.g = 0.0f;
 		// color.b = 0.0f;
 		// color = color + 5.0f * harmonics;
-		color = color + harmonics;
+		// color = color + harmonics;
 
-		
+		vec4 colBaked = color + 1.0f * harmonics;
+		colBaked = glm::max(colBaked, 0.0f);
 
-		color = glm::max(color, 0.0f);
+		uint32_t C = 
+			(uint32_t(clamp(256.0f * colBaked.r, 0.0f, 255.0f)) <<  0) |
+			(uint32_t(clamp(256.0f * colBaked.g, 0.0f, 255.0f)) <<  8) |
+			(uint32_t(clamp(256.0f * colBaked.b, 0.0f, 255.0f)) << 16) |
+			(uint32_t(clamp(256.0f * colBaked.a, 0.0f, 255.0f)) << 24);
+		model.color_resolved[splatIndex] = C;
+
+		// color = colBaked;
+	}
+
+	if(model.shDegree > 0 )
+	{
+		uint32_t C = model.color_resolved[splatIndex];
+
+		color.r = float((C >>  0) & 0xff) / 256.0f;
+		color.g = float((C >>  8) & 0xff) / 256.0f;
+		color.b = float((C >> 16) & 0xff) / 256.0f;
+		color.a = float((C >> 24) & 0xff) / 256.0f;
 	}
 
 
@@ -470,8 +484,8 @@ void kernel_stageSplats(
 
 	if(args.uniforms.cullSmallSplats){
 		// clip tiny gaussians
-		if(eigenValue1 < 0.05f) return;
-		if(eigenValue2 < 0.05f) return;
+		if(eigenValue1 < 0.02f) return;
+		if(eigenValue2 < 0.02f) return;
 	}else{
 		eigenValue1 = max(eigenValue1, 0.0f);
 		eigenValue2 = max(eigenValue2, 0.0f);

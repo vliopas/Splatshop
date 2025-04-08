@@ -584,7 +584,10 @@ void drawsplats_3dgs_concurrent(
 				&target.virt_stagedata->cptr, &pointsInTileThreshold
 			};
 
-			if(settings.showSolid){
+			if(settings.rendermode == RENDERMODE_HEATMAP){
+				pointsInTileThreshold = 1'000'000;
+				editor->prog_gaussians_rendering->launch("kernel_render_heatmap", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
+			}else if(settings.showSolid){
 				pointsInTileThreshold = 1'000'000;
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_solid", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}else if(settings.enableSplatCulling){
@@ -1081,7 +1084,10 @@ void drawsplats_3dgs_concurrent_fragintersections(
 				&target.virt_stagedata->cptr, &pointsInTileThreshold
 			};
 
-			if(settings.showSolid){
+			if(settings.rendermode == RENDERMODE_HEATMAP){
+				pointsInTileThreshold = 1'000'000;
+				editor->prog_gaussians_rendering->launch("kernel_render_heatmap", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
+			}else if(settings.showSolid){
 				pointsInTileThreshold = 1'000'000;
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians_solid", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}else if(settings.enableSplatCulling){
@@ -1092,6 +1098,8 @@ void drawsplats_3dgs_concurrent_fragintersections(
 				pointsInTileThreshold = 1'000'000;
 				editor->prog_gaussians_rendering->launch("kernel_render_gaussians", args_rendering, {.gridsize = numTiles, .blocksize = 256, .stream = target.sidestream});
 			}
+
+			
 		}
 	}
 

@@ -215,7 +215,8 @@ struct SplatEditor{
 		Brush brush;
 		RectSelect rectselect;
 		ColorCorrection colorCorrection;
-		bool hideGUI = false;
+		bool hideGUI                     = false;
+		float vr_brushSize               = 0.1f;
 
 		// - We need to be able to disable shortcuts while typing, for example.
 		// - Actions at the end of a frame (e.g. processing an opened context menu) may want to disable shortcuts for as long as context menu is open.
@@ -241,6 +242,7 @@ struct SplatEditor{
 		bool renderSoA = false;
 		bool renderBandwidth = false;
 		bool renderFragIntersections = false;
+
 	} settings;
 
 	struct {
