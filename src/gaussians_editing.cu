@@ -299,6 +299,8 @@ void kernel_apply_transformation(
 		model.quaternion[splatIndex].w = q.z / l;
 	}
 
+	// TODO: Spherical Harmonics
+
 	{
 		vec3 scale = model.scale[splatIndex];
 		scale = scale * dscale;
@@ -921,14 +923,9 @@ void kernel_paint_sphere(
 
 	if(d < radius){
 
-		for(int i = 0; i < numTicks; i++){
-
+		if(args.uniforms.brushColorMode == BRUSHCOLORMODE_NORMAL){
 			float w_dist = clamp((radius - d) / radius, 0.0f, 1.0f);
-			// float w_strength = 0.01f;
-			// float w_strength = pow(args.brush.strength, 2.0f);
 			float w_opacity = paintColor.a;
-			// w_opacity = 0.5f;
-			// w_dist = 1.0f;
 			float w = w_dist * w_opacity;
 
 			float splatOpacity = stashedColors[index].normalized().a;
@@ -950,6 +947,18 @@ void kernel_paint_sphere(
 			}else{
 				model.color[index] = Color::fromNormalized(vec4{newCurrent, splatOpacity});
 			}
+		}else if(args.uniforms.brushColorMode == BRUSHCOLORMODE_HUE_SATURATION){
+			float splatOpacity = stashedColors[index].normalized().a;
+			vec3 csplat = model.color[index].normalized();
+
+			vec3 hsl_brush = rgbToHSL(paintColor.r, paintColor.g, paintColor.b);
+			vec3 hsl_splat = rgbToHSL(csplat.r, csplat.g, csplat.b);
+			
+			hsl_splat.r = hsl_brush.r;
+			hsl_splat.g = hsl_brush.g;
+			vec3 result = hslToRgb(hsl_splat.r, hsl_splat.g, hsl_splat.b);
+
+			model.color[index] = Color::fromNormalized(vec4{result, splatOpacity});
 		}
 
 	}

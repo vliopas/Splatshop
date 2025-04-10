@@ -20,15 +20,16 @@ using namespace std;
 #include <cuda_fp16.h>
 
 #include "./libs/glm/glm/glm.hpp"
-// #include "./libs/glm/glm/gtc/matrix_transform.hpp"
+#include "./libs/glm/glm/gtc/matrix_transform.hpp"
 // #include "./libs/glm/glm/gtc/matrix_access.hpp"
 // #include "./libs/glm/glm/gtx/transform.hpp"
 #include "./libs/glm/glm/gtc/quaternion.hpp"
-// #include "./libs/glm/glm/gtx/matrix_decompose.hpp"
+#include "./libs/glm/glm/gtx/matrix_decompose.hpp"
 
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
 #include "math.cuh"
+#include "shutils.cuh"
 
 namespace cg = cooperative_groups;
 
@@ -42,6 +43,7 @@ using glm::quat;
 using glm::dot;
 using glm::transpose;
 using glm::inverse;
+
 
 constexpr int VIEWMODE_DESKTOP = 0;
 constexpr int VIEWMODE_DESKTOP_VR = 1;
@@ -253,10 +255,13 @@ vec3 getHarmonics(
 	return result;
 }
 
+
+
 // We need the same iteration logic for "touched" tiles in multiple kernels. 
 template <typename Function>
 void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
 
+	// use approximate tile-splat intersection
 	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
 	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
 
@@ -300,6 +305,138 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 		}
 	}
 }
+
+template <typename Function>
+void forEachTouchedTile(int mode, vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+
+	if(mode == INTERSECTION_APPROXIMATE){
+		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+	}else if(mode == INTERSECTION_3DGS){
+		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+	}else if(mode == INTERSECTION_TIGHTBB){
+		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+	}
+
+}
+
+// We need the same iteration logic for "touched" tiles in multiple kernels. 
+template <typename Function>
+void forEachTouchedTile_approx(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+
+	// use approximate tile-splat intersection
+	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
+	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
+
+	ivec2 tile_start = {
+		(splatCoord.x - quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y - quadHalfHeight) / TILE_SIZE_3DGS};
+	ivec2 tile_end = {
+		(splatCoord.x + quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y + quadHalfHeight) / TILE_SIZE_3DGS};
+
+	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
+	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
+
+	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
+	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
+
+	tile_start.x = max(tile_start.x, 0);
+	tile_end.x = min(tile_end.x, int(tiles_x) - 1);
+
+	tile_start.y = max(tile_start.y, 0);
+	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
+
+	// float diag = 22.627416997969522f;  // sqrt(16.0f * 16.0f + 16.0f * 16.0f);
+	float tileRadius = 11.313708498984761f + 0.0f; // sqrt(8.0f * 8.0f + 8.0f * 8.0f);
+	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
+	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
+	{
+		vec2 tilePos = {tile_x * 16.0f + 8.0f, tile_y * 16.0f + 8.0f}; 
+
+		bool intersectsTile = intersection_circle_splat(
+			tilePos, tileRadius, 
+			splatCoord, 
+			basisVector1, 
+			basisVector2
+		);
+
+		// intersectsTile = true;
+
+		if(intersectsTile){
+			f(tile_x, tile_y);
+		}
+	}
+}
+
+// We need the same iteration logic for "touched" tiles in multiple kernels. 
+template <typename Function>
+void forEachTouchedTile_3dgs(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+
+	// Use 3DGS-style bounding box around ellipses' bounding sphere
+	float maxRadius = max(length(basisVector1), length(basisVector2));
+
+	ivec2 tile_start = {
+		(splatCoord.x - maxRadius) / TILE_SIZE_3DGS,
+		(splatCoord.y - maxRadius) / TILE_SIZE_3DGS,
+	};
+	ivec2 tile_end = {
+		(splatCoord.x + maxRadius) / TILE_SIZE_3DGS,
+		(splatCoord.y + maxRadius) / TILE_SIZE_3DGS,
+	};
+
+	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
+	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
+
+	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
+	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
+
+	tile_start.x = max(tile_start.x, 0);
+	tile_end.x = min(tile_end.x, int(tiles_x) - 1);
+
+	tile_start.y = max(tile_start.y, 0);
+	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
+
+	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
+	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
+	{
+		f(tile_x, tile_y);
+	}
+}
+
+template <typename Function>
+void forEachTouchedTile_tightBB(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
+
+	// Use tight bounding box around ellipse
+	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
+	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
+
+	ivec2 tile_start = {
+		(splatCoord.x - quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y - quadHalfHeight) / TILE_SIZE_3DGS};
+	ivec2 tile_end = {
+		(splatCoord.x + quadHalfWidth) / TILE_SIZE_3DGS,
+		(splatCoord.y + quadHalfHeight) / TILE_SIZE_3DGS};
+
+	float tiles_x = ceil(target.width / float(TILE_SIZE_3DGS));
+	float tiles_y = ceil(target.height / float(TILE_SIZE_3DGS));
+
+	if(tile_end.x < 0 || tile_start.x >= tiles_x) return;
+	if(tile_end.y < 0 || tile_start.y >= tiles_y) return;
+
+	tile_start.x = max(tile_start.x, 0);
+	tile_end.x = min(tile_end.x, int(tiles_x) - 1);
+
+	tile_start.y = max(tile_start.y, 0);
+	tile_end.y = min(tile_end.y, int(tiles_y) - 1);
+
+	for(int tile_x = tile_start.x; tile_x <= tile_end.x; tile_x++)
+	for(int tile_y = tile_start.y; tile_y <= tile_end.y; tile_y++)
+	{
+		f(tile_x, tile_y);
+	}
+}
+
+
 
 bool isDebugTile(int x, int y){
 	return x == dbgtile_x && y == dbgtile_y;
@@ -368,21 +505,140 @@ void kernel_stageSplats(
 		// if(splatIndex == 0) printf("model.numSHCoefficients: %d \n", model.numSHCoefficients);
 		// int64_t offset = splatIndex * 45;
 		int64_t offset = splatIndex * model.numSHCoefficients;
-		vec3* sh = (vec3*)(model.sphericalHarmonics + offset);
-		vec3 camPos = target.view * vec4(0.0f, 0.0f, 0.0f, 1.0f);
-		vec3 camdir = normalize(vec3(worldPos) - camPos);
-		camdir = vec3(((model.transform)) * vec4(camdir, 0.0f));
-		camdir = vec3(camdir.x, -camdir.z, camdir.y);
+		vec3* shs = (vec3*)(model.sphericalHarmonics + offset);
+		vec3 camPos = inverse(target.view) * vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		
 
-		vec4 harmonics = vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, sh), 0.0f);
-		// color.r = 0.0f;
-		// color.g = 0.0f;
-		// color.b = 0.0f;
-		// color = color + 5.0f * harmonics;
-		// color = color + harmonics;
+		vec4 harmonics = vec4{0.0f};
+		// camdir = normalize(vec3{
+		// 	cos(0.5f * floor(args.uniforms.time)), 
+		// 	sin(0.5f * floor(args.uniforms.time)), 
+		// 	 0.0f
+		// });
 
-		vec4 colBaked = color + 1.0f * harmonics;
+
+		int degree = 2;
+		// int degree = model.shDegree;
+
+		bool transformSplatwise;
+		transformSplatwise = true;
+		transformSplatwise = false;
+		transformSplatwise = int(floor(args.uniforms.time)) % 2 == 0;
+
+		auto dp = [](int n, const vec3* a, const float* b){
+
+			vec3 sum = {0.0f, 0.0f, 0.0f};
+
+			for(int i = 0; i < n; i++){
+				sum = sum + a[i] * b[i];
+			}
+			
+			return sum;
+		};
+
+		if(!transformSplatwise)
+		{ // normal harmonics
+
+			// by transforming camera
+			vec3 camdir = normalize(vec3(worldPos) - camPos);
+			camdir = vec3((inverse(model.transform)) * vec4(camdir, 0.0f));
+
+			harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs), 0.0f);
+
+		}else { // transformed harmonics
+
+			// by transforming spherical harmonics
+			
+			// SH rotation code from: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/SHLib.cpp#L1090
+			// LICENSE: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/LICENSE.md (public domain)
+			vec3 camdir = normalize(vec3(worldPos) - camPos);
+
+			vec3 shs_transformed[15];
+
+			vec3 d_scale;
+			quat d_rotation;
+			vec3 d_translation;
+			vec3 d_skew;
+			vec4 d_perspective;
+			glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+			d_rotation = glm::conjugate(d_rotation);
+
+			mat3 rot = glm::mat3_cast(d_rotation);
+			rot = glm::transpose(rot);
+
+			float sh1[3][3] = 
+			{
+				{rot[1].y, rot[2].y, rot[0].y},
+				{rot[1].z, rot[2].z, rot[0].z},
+				{rot[1].x, rot[2].x, rot[0].x},
+			};
+
+			if(degree > 0)
+			{ // DEGREE 1
+				shs_transformed[0] = dp(3, shs + 0, sh1[0]);
+				shs_transformed[1] = dp(3, shs + 0, sh1[1]);
+				shs_transformed[2] = dp(3, shs + 0, sh1[2]);
+			}
+
+			if(degree > 1)
+			{ // DEGREE 2
+				float sh2[5][5];
+
+				sh2[0][0] = kSqrt01_04 * ((sh1[2][2] * sh1[0][0] + sh1[2][0] * sh1[0][2]) + (sh1[0][2] * sh1[2][0] + sh1[0][0] * sh1[2][2]));
+				sh2[0][1] =               (sh1[2][1] * sh1[0][0] + sh1[0][1] * sh1[2][0]);
+				sh2[0][2] = kSqrt03_04 *  (sh1[2][1] * sh1[0][1] + sh1[0][1] * sh1[2][1]);
+				sh2[0][3] =               (sh1[2][1] * sh1[0][2] + sh1[0][1] * sh1[2][2]);
+				sh2[0][4] = kSqrt01_04 * ((sh1[2][2] * sh1[0][2] - sh1[2][0] * sh1[0][0]) + (sh1[0][2] * sh1[2][2] - sh1[0][0] * sh1[2][0]));
+
+				shs_transformed[3] = dp(5, shs + 3, sh2[0]);
+				
+				sh2[1][0] = kSqrt01_04 * ((sh1[1][2] * sh1[0][0] + sh1[1][0] * sh1[0][2]) + (sh1[0][2] * sh1[1][0] + sh1[0][0] * sh1[1][2]));
+				sh2[1][1] =                sh1[1][1] * sh1[0][0] + sh1[0][1] * sh1[1][0];
+				sh2[1][2] = kSqrt03_04 *  (sh1[1][1] * sh1[0][1] + sh1[0][1] * sh1[1][1]);
+				sh2[1][3] =                sh1[1][1] * sh1[0][2] + sh1[0][1] * sh1[1][2];
+				sh2[1][4] = kSqrt01_04 * ((sh1[1][2] * sh1[0][2] - sh1[1][0] * sh1[0][0]) + (sh1[0][2] * sh1[1][2] - sh1[0][0] * sh1[1][0]));
+
+				shs_transformed[4] = dp(5, shs + 3, sh2[1]);
+
+				sh2[2][0] = kSqrt01_03 * (sh1[1][2] * sh1[1][0] + sh1[1][0] * sh1[1][2]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) + (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
+				sh2[2][1] = kSqrt04_03 *  sh1[1][1] * sh1[1][0] - kSqrt01_03 * (sh1[2][1] * sh1[2][0] + sh1[0][1] * sh1[0][0]);
+				sh2[2][2] =               sh1[1][1] * sh1[1][1] - kSqrt01_04 * (sh1[2][1] * sh1[2][1] + sh1[0][1] * sh1[0][1]);
+				sh2[2][3] = kSqrt04_03 *  sh1[1][1] * sh1[1][2] - kSqrt01_03 * (sh1[2][1] * sh1[2][2] + sh1[0][1] * sh1[0][2]);
+				sh2[2][4] = kSqrt01_03 * (sh1[1][2] * sh1[1][2] - sh1[1][0] * sh1[1][0]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) + (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
+
+				shs_transformed[5] = dp(5, shs + 3, sh2[2]);
+
+				sh2[3][0] = kSqrt01_04 * ((sh1[1][2] * sh1[2][0] + sh1[1][0] * sh1[2][2]) + (sh1[2][2] * sh1[1][0] + sh1[2][0] * sh1[1][2]));
+				sh2[3][1] =                sh1[1][1] * sh1[2][0] + sh1[2][1] * sh1[1][0];
+				sh2[3][2] = kSqrt03_04 *  (sh1[1][1] * sh1[2][1] + sh1[2][1] * sh1[1][1]);
+				sh2[3][3] =                sh1[1][1] * sh1[2][2] + sh1[2][1] * sh1[1][2];
+				sh2[3][4] = kSqrt01_04 * ((sh1[1][2] * sh1[2][2] - sh1[1][0] * sh1[2][0]) + (sh1[2][2] * sh1[1][2] - sh1[2][0] * sh1[1][0]));
+
+				shs_transformed[6] = dp(5, shs + 3, sh2[3]);
+
+				sh2[4][0] = kSqrt01_04 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) - (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
+				sh2[4][1] =               (sh1[2][1] * sh1[2][0] - sh1[0][1] * sh1[0][0]);
+				sh2[4][2] = kSqrt03_04 *  (sh1[2][1] * sh1[2][1] - sh1[0][1] * sh1[0][1]);
+				sh2[4][3] =               (sh1[2][1] * sh1[2][2] - sh1[0][1] * sh1[0][2]);
+				sh2[4][4] = kSqrt01_04 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) - (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
+
+				shs_transformed[7] = dp(5, shs + 3, sh2[4]);
+
+			}
+			
+	
+			
+
+			harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs_transformed), 0.0f);
+			
+
+		}
+
+
+		// vec4 colBaked = color + 1.0f * harmonics;
+		vec4 colBaked = 10.0f * harmonics;
 		colBaked = glm::max(colBaked, 0.0f);
+		colBaked.a = color.a;
 
 		uint32_t C = 
 			(uint32_t(clamp(256.0f * colBaked.r, 0.0f, 255.0f)) <<  0) |
@@ -478,18 +734,28 @@ void kernel_stageSplats(
 	float D = a * d - b * b;
 	float trace = a + d;
 	float traceOver2 = 0.5f * trace;
-	float term2 = sqrt(max(0.05f, traceOver2 * traceOver2 - D));
+	float term2 = sqrt(max(0.1f, traceOver2 * traceOver2 - D));
 	float eigenValue1 = traceOver2 + term2;
 	float eigenValue2 = traceOver2 - term2;
+
+	// eigenValue1 = max(eigenValue1, 0.1f);
+	// eigenValue2 = max(eigenValue2, 0.1f);
 
 	if(args.uniforms.cullSmallSplats){
 		// clip tiny gaussians
 		if(eigenValue1 < 0.02f) return;
 		if(eigenValue2 < 0.02f) return;
 	}else{
-		eigenValue1 = max(eigenValue1, 0.0f);
-		eigenValue2 = max(eigenValue2, 0.0f);
+		eigenValue1 = max(eigenValue1, 0.001f);
+		eigenValue2 = max(eigenValue2, 0.001f);
+
+		// reduce opacity of small splats
+		if(eigenValue1 == 0.001f) color.a *= 0.15f;
+		if(eigenValue2 == 0.001f) color.a *= 0.15f;
+
+		// cull small splats with little opacity?
 	}
+	if(color.a < 10.0f / 256.0f) return;
 
 	if(args.uniforms.makePoints){
 		if(eigenValue1 < 0.105f) return;

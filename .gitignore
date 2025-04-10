@@ -85,3 +85,12 @@ splatmodels_garden/
 garden.ply
 splatmodels_citygaussians_cleaned/
 splatmodels_tableremoval/
+splatmodels_train/
+splatmodels_graffiti/
+splatmodels_graffiti2/
+splatmodels_benchmark_garden_far/
+splatmodels_benchmark_garden_close/
+splatmodels_benchmark_campus_close/
+splatmodels_benchmark_campus_far/
+splatmodels_statue_1/
+splatmodels_statue2/

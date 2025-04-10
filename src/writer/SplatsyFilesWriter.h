@@ -29,7 +29,26 @@ using namespace std;
 
 namespace SplatsyFilesWriter{
 
-	inline string createHeader(int64_t numSplats){
+	static int shDegreeToNumCoefficients(int degree){
+
+		if(degree == 0) return 1;
+		if(degree == 1) return 4;
+		if(degree == 2) return 9;
+		if(degree == 3) return 16;
+
+		return 0;
+	}
+
+	static int numCoefficientsToShDegree(int numCoefficients){
+		if(numCoefficients == 1) return 0;
+		if(numCoefficients == 4) return 1;
+		if(numCoefficients == 9) return 2;
+		if(numCoefficients == 16) return 3;
+
+		return 0;
+	}
+
+	inline string createHeader(int64_t numSplats, int shDegree){
 
 		stringstream ss;
 
@@ -47,9 +66,10 @@ namespace SplatsyFilesWriter{
 		println(ss, "property float f_dc_1");
 		println(ss, "property float f_dc_2");
 
-		// for(int i = 0; i < 45; i++){
-		// 	println(ss, "property float f_rest_{}", i);
-		// }
+		int numSHFloats = 3 * shDegreeToNumCoefficients(shDegree) - 3;
+		for(int i = 0; i < numSHFloats; i++){
+			println(ss, "property float f_rest_{}", i);
+		}
 
 		println(ss, "property float opacity");
 		println(ss, "property float scale_0");
@@ -78,10 +98,11 @@ namespace SplatsyFilesWriter{
 		auto t_start = now();
 
 		int64_t numSplats = data.count;
-		string header = createHeader(numSplats);
+		string header = createHeader(numSplats, data.shDegree);
 
 		// uint64_t bytesPerSplat = 62 * 4; // with degree 3 SHs
-		uint64_t bytesPerSplat = 17 * 4; // with no SHs
+		int64_t numSHFloats = shDegreeToNumCoefficients(data.shDegree) * 3 - 3;
+		uint64_t bytesPerSplat = (17 + numSHFloats) * 4; // with no SHs
 		uint64_t splatsByteSize = bytesPerSplat * numSplats;
 		uint64_t filesize = header.size() + splatsByteSize;
 		shared_ptr<Buffer> buffer = make_shared<Buffer>(filesize);
@@ -92,6 +113,7 @@ namespace SplatsyFilesWriter{
 		uint64_t splatsStart = header.size();
 		// uint64_t numSHBytes = 45 * 4;
 
+
 		uint64_t OFFSETS_POSITION   =  0 * 4;
 		uint64_t OFFSETS_DC         =  6 * 4;
 		uint64_t OFFSETS_SHs        =  9 * 4;
@@ -100,21 +122,23 @@ namespace SplatsyFilesWriter{
 		// uint64_t OFFSETS_SCALE      = 55 * 4;
 		// uint64_t OFFSETS_ROTATION   = 58 * 4;
 		// with no SHs
-		uint64_t OFFSETS_OPACITY    = 9 * 4;
-		uint64_t OFFSETS_SCALE      = 10 * 4;
-		uint64_t OFFSETS_ROTATION   = 13 * 4;
+		uint64_t OFFSETS_OPACITY    = (numSHFloats +  9)* 4;
+		uint64_t OFFSETS_SCALE      = (numSHFloats + 10) * 4;
+		uint64_t OFFSETS_ROTATION   = (numSHFloats + 13) * 4;
 
 		shared_ptr<Buffer> position_loading = make_shared<Buffer>(12 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> scale_loading    = make_shared<Buffer>(12 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> rotation_loading = make_shared<Buffer>(16 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> color_loading    = make_shared<Buffer>( 8 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> flags_loading    = make_shared<Buffer>( 4 * MAX_BATCHSIZE);
+		shared_ptr<Buffer> shs_loading      = make_shared<Buffer>( 4 * MAX_BATCHSIZE * numSHFloats);
 
 		shared_ptr<Buffer> position_processing = make_shared<Buffer>(12 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> scale_processing    = make_shared<Buffer>(12 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> rotation_processing = make_shared<Buffer>(16 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> color_processing    = make_shared<Buffer>( 8 * MAX_BATCHSIZE);
 		shared_ptr<Buffer> flags_processing    = make_shared<Buffer>( 4 * MAX_BATCHSIZE);
+		shared_ptr<Buffer> shs_processing      = make_shared<Buffer>( 4 * MAX_BATCHSIZE * numSHFloats);
 
 		vec3 t_dscale;
 		quat t_rotation;
@@ -125,11 +149,12 @@ namespace SplatsyFilesWriter{
 		t_rotation = glm::conjugate(t_rotation);
 
 		auto downloadBatch = [&](int64_t firstSplat, int64_t numSplats){
-			cuMemcpyDtoHAsync(position_loading->data , (CUdeviceptr)(data.position   + firstSplat), 12 * numSplats, 0);
-			cuMemcpyDtoHAsync(scale_loading->data    , (CUdeviceptr)(data.scale      + firstSplat), 12 * numSplats, 0);
-			cuMemcpyDtoHAsync(rotation_loading->data , (CUdeviceptr)(data.quaternion + firstSplat), 16 * numSplats, 0);
-			cuMemcpyDtoHAsync(color_loading->data    , (CUdeviceptr)(data.color      + firstSplat),  8 * numSplats, 0);
-			cuMemcpyDtoHAsync(flags_loading->data    , (CUdeviceptr)(data.flags      + firstSplat),  4 * numSplats, 0);
+			cuMemcpyDtoHAsync(position_loading->data , (CUdeviceptr)(data.position           + firstSplat), 12 * numSplats, 0);
+			cuMemcpyDtoHAsync(scale_loading->data    , (CUdeviceptr)(data.scale              + firstSplat), 12 * numSplats, 0);
+			cuMemcpyDtoHAsync(rotation_loading->data , (CUdeviceptr)(data.quaternion         + firstSplat), 16 * numSplats, 0);
+			cuMemcpyDtoHAsync(color_loading->data    , (CUdeviceptr)(data.color              + firstSplat),  8 * numSplats, 0);
+			cuMemcpyDtoHAsync(flags_loading->data    , (CUdeviceptr)(data.flags              + firstSplat),  4 * numSplats, 0);
+			cuMemcpyDtoHAsync(shs_loading->data      , (CUdeviceptr)(data.sphericalHarmonics + firstSplat * numSHFloats),  4 * numSplats * numSHFloats, 0);
 			cuEventRecord(event_memcopied, 0);
 		};
 
@@ -148,6 +173,7 @@ namespace SplatsyFilesWriter{
 			std::swap(rotation_loading , rotation_processing);
 			std::swap(color_loading    , color_processing);
 			std::swap(flags_loading    , flags_processing);
+			std::swap(shs_loading      , shs_processing);
 
 			{ // then start downloading next batch before processing current batch
 				int64_t nextBatchStart = (batchIndex + 1) * MAX_BATCHSIZE;
@@ -170,78 +196,105 @@ namespace SplatsyFilesWriter{
 
 				if(isDeleted) continue;
 				
-				// POSITION
-				auto pos = glm::vec4(
-					position_processing->get<float>(12 * i + 0),
-					position_processing->get<float>(12 * i + 4),
-					position_processing->get<float>(12 * i + 8),
-					1.0
-				);
-				pos = node->transform * pos;
-				buffer->set<float>(pos.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 0);
-				buffer->set<float>(pos.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 4);
-				buffer->set<float>(pos.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 8);
+				{ // POSITION
+					auto pos = glm::vec4(
+						position_processing->get<float>(12 * i + 0),
+						position_processing->get<float>(12 * i + 4),
+						position_processing->get<float>(12 * i + 8),
+						1.0
+					);
+					pos = node->transform * pos;
+					buffer->set<float>(pos.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 0);
+					buffer->set<float>(pos.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 4);
+					buffer->set<float>(pos.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_POSITION + 8);
+				}
 
-				// SCALE
-				vec3 s = {
-					t_dscale.x * scale_processing->get<float>(12 * i + 0),
-					t_dscale.y * scale_processing->get<float>(12 * i + 4),
-					t_dscale.z * scale_processing->get<float>(12 * i + 8),
-				};
-				vec3 s_out = {
-					log(s.x),
-					log(s.y),
-					log(s.z),
-				};
-				buffer->set<float>(s_out.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 0);
-				buffer->set<float>(s_out.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 4);
-				buffer->set<float>(s_out.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 8);
+				{ // SCALE
+					vec3 s = {
+						t_dscale.x * scale_processing->get<float>(12 * i + 0),
+						t_dscale.y * scale_processing->get<float>(12 * i + 4),
+						t_dscale.z * scale_processing->get<float>(12 * i + 8),
+					};
+					vec3 s_out = {
+						log(s.x),
+						log(s.y),
+						log(s.z),
+					};
+					buffer->set<float>(s_out.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 0);
+					buffer->set<float>(s_out.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 4);
+					buffer->set<float>(s_out.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_SCALE + 8);
+				}
 
-				// ROTATION
-				auto q = glm::quat(
-					rotation_processing->get<float>(16 * i +  0),
-					rotation_processing->get<float>(16 * i +  4),
-					rotation_processing->get<float>(16 * i +  8),
-					rotation_processing->get<float>(16 * i + 12)
-				);
-				q = t_rotation * q;
-				// float l = sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-				// l = 1.0f;
+				{// ROTATION
+					auto q = glm::quat(
+						rotation_processing->get<float>(16 * i +  0),
+						rotation_processing->get<float>(16 * i +  4),
+						rotation_processing->get<float>(16 * i +  8),
+						rotation_processing->get<float>(16 * i + 12)
+					);
+					q = t_rotation * q;
+					// float l = sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+					// l = 1.0f;
 
-				buffer->set<float>(q.w, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  0);
-				buffer->set<float>(q.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  4);
-				buffer->set<float>(q.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  8);
-				buffer->set<float>(q.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION + 12);
+					buffer->set<float>(q.w, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  0);
+					buffer->set<float>(q.x, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  4);
+					buffer->set<float>(q.y, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION +  8);
+					buffer->set<float>(q.z, splatsStart + numWritten * bytesPerSplat + OFFSETS_ROTATION + 12);
+				}
 
-				// COLOR
-				float r       = float(color_processing->get<uint16_t>(8 * i + 0)) / 65536.0f;
-				float g       = float(color_processing->get<uint16_t>(8 * i + 2)) / 65536.0f;
-				float b       = float(color_processing->get<uint16_t>(8 * i + 4)) / 65536.0f;
-				float opacity = float(color_processing->get<uint16_t>(8 * i + 6)) / 65536.0f;
-				float dc0 = (r - 0.5) / 0.28209479177387814;
-				float dc1 = (g - 0.5) / 0.28209479177387814;
-				float dc2 = (b - 0.5) / 0.28209479177387814;
+				{ // COLOR & OPACITY
+					float r       = float(color_processing->get<uint16_t>(8 * i + 0)) / 65536.0f;
+					float g       = float(color_processing->get<uint16_t>(8 * i + 2)) / 65536.0f;
+					float b       = float(color_processing->get<uint16_t>(8 * i + 4)) / 65536.0f;
+					float opacity = float(color_processing->get<uint16_t>(8 * i + 6)) / 65536.0f;
+					float dc0 = (r - 0.5) / 0.28209479177387814;
+					float dc1 = (g - 0.5) / 0.28209479177387814;
+					float dc2 = (b - 0.5) / 0.28209479177387814;
 
-				buffer->set<float>(dc0, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  0);
-				buffer->set<float>(dc1, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  4);
-				buffer->set<float>(dc2, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  8);
+					buffer->set<float>(dc0, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  0);
+					buffer->set<float>(dc1, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  4);
+					buffer->set<float>(dc2, splatsStart + numWritten * bytesPerSplat + OFFSETS_DC +  8);
 
-				// OPACITY
-				float opacity_out = -log(1.0 / opacity - 1.0);
-				buffer->set<float>(opacity_out, splatsStart + numWritten * bytesPerSplat + OFFSETS_OPACITY);
+					// OPACITY
+					float opacity_out = -log(1.0 / opacity - 1.0);
+					buffer->set<float>(opacity_out, splatsStart + numWritten * bytesPerSplat + OFFSETS_OPACITY);
+				}
+
+				if(data.shDegree > 0)
+				{ // SPHERICAL HARMONICS
+					// SHs need to be saved in [rrr..][ggg..][bbb..] order. 
+					// For rendering they are in [rgb][rgb]... order.
+
+					int64_t floatsPerChannel = shDegreeToNumCoefficients(data.shDegree) - 1;
+
+					for(int64_t j = 0; j < floatsPerChannel; j++){
+
+						// "local" source and target index, relative to a single splat's SH data
+						int64_t numSHBytes = sizeof(float) * 3 * floatsPerChannel;
+						float a = shs_processing->get<float>(numSHBytes * i + 12 * j + 0);
+						float b = shs_processing->get<float>(numSHBytes * i + 12 * j + 4);
+						float c = shs_processing->get<float>(numSHBytes * i + 12 * j + 8);
+						
+						int64_t shsOffsetTarget = splatsStart + numWritten * bytesPerSplat + OFFSETS_SHs;
+						buffer->set<float>(a, shsOffsetTarget + 4 * (0 * floatsPerChannel + j));
+						buffer->set<float>(b, shsOffsetTarget + 4 * (1 * floatsPerChannel + j));
+						buffer->set<float>(c, shsOffsetTarget + 4 * (2 * floatsPerChannel + j));
+
+					}
+				}
 
 				numWritten++;
 
-				if(numWritten % 100'000 == 0){
-					int index = batchIndex * MAX_BATCHSIZE + i;
-					println("# Debug Splat, index {}", index);
-					println("    position:     {:.3f}, {:.3f}, {:.3f}           ", pos.x, pos.y, pos.z);
-					println("    scale:        {:.3f}, {:.3f}, {:.3f}           -> {:.3f}, {:.3f}, {:.3f}", s.x, s.y, s.z, s_out.x, s_out.y, s_out.z);
-					println("    quaternion:   {:.3f}, {:.3f}, {:.3f}, {:.3f}   -> (x, y, z, w) stored as (w, x, y, z)", q.x, q.y, q.z, q.w);
-					println("    color(rgb):   {:3}, {:3}, {:3}                 -> {:3}, {:3}, {:3}", r, g, b, dc0, dc1, dc2);
-					println("    opacity:      {:.3f}                           -> {:.3f}", opacity, opacity_out);
+				//if(numWritten % 100'000 == 0){
+				//	int index = batchIndex * MAX_BATCHSIZE + i;
+				//	println("# Debug Splat, index {}", index);
+				//	println("    position:     {:.3f}, {:.3f}, {:.3f}           ", pos.x, pos.y, pos.z);
+				//	println("    scale:        {:.3f}, {:.3f}, {:.3f}           -> {:.3f}, {:.3f}, {:.3f}", s.x, s.y, s.z, s_out.x, s_out.y, s_out.z);
+				//	println("    quaternion:   {:.3f}, {:.3f}, {:.3f}, {:.3f}   -> (x, y, z, w) stored as (w, x, y, z)", q.x, q.y, q.z, q.w);
+				//	println("    color(rgb):   {:3}, {:3}, {:3}                 -> {:3}, {:3}, {:3}", r, g, b, dc0, dc1, dc2);
+				//	println("    opacity:      {:.3f}                           -> {:.3f}", opacity, opacity_out);
 
-				}
+				//}
 			}
 		}
 
@@ -252,11 +305,11 @@ namespace SplatsyFilesWriter{
 		// Reduce reported size of the buffer object to the actual amount of bytes used. 
 		buffer->size = splatsStart + numWritten * bytesPerSplat;
 
-		shared_ptr<jthread> t = make_shared<jthread>([path, buffer, numWritten](){
+		shared_ptr<jthread> t = make_shared<jthread>([path, buffer, numWritten, data](){
 			shared_ptr<Buffer> _buffer = buffer;
 
 			// update header with actual amount of points
-			string header = createHeader(numWritten);
+			string header = createHeader(numWritten, data.shDegree);
 			memcpy(buffer->data, header.c_str(), header.size());
 
 			// println("writing to path: {}; bytes: {:L}", path, _buffer->size);
@@ -318,7 +371,13 @@ namespace SplatsyFilesWriter{
 					count++;
 				}
 				usedNames.insert(nodename);
-				string nodepath = format("{}/splats/{}.ply", path, nodename);
+
+				string nodepath = format("{}/splats/{}", path, nodename);
+
+				if(!iEndsWith(nodepath, ".ply")){
+					nodepath = nodepath + ".ply";
+				}
+				
 				// write((SNSplats*)node, j_scene, nodepath, threads);
 				write_batched((SNSplats*)node, j_scene, nodepath, threads);
 			}

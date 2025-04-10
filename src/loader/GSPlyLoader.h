@@ -40,6 +40,25 @@ struct GSPlyHeader{
 
 struct GSPlyLoader{
 
+	static int shDegreeToNumCoefficients(int degree){
+
+		if(degree == 0) return 1;
+		if(degree == 1) return 4;
+		if(degree == 2) return 9;
+		if(degree == 3) return 16;
+
+		return 0;
+	}
+
+	static int numCoefficientsToShDegree(int numCoefficients){
+		if(numCoefficients == 1) return 0;
+		if(numCoefficients == 4) return 1;
+		if(numCoefficients == 9) return 2;
+		if(numCoefficients == 16) return 3;
+
+		return 0;
+	}
+
 	static GSPlyHeader readHeader(string path){
 
 		int64_t numSplats = 0;

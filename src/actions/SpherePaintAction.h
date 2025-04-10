@@ -523,6 +523,11 @@ struct SpherePaintAction : public InputAction{
 		ImGui::SetNextItemWidth(100.0f);
 		// ImGui::SliderFloat("##opacity", &editor->settings.brush.opacity, 0.01f, 1.0f);
 		ImGui::SliderFloat("##opacity", &paintActionColor.w, 0.01f, 1.0f);
+
+		ImGui::SameLine(); ImGui::Text("|");
+		ImGui::SameLine(); ImGui::Text("Mode: ");
+		ImGui::SameLine(); ImGui::RadioButton("Normal", &editor->settings.brushColorMode, BRUSHCOLORMODE_NORMAL);
+		ImGui::SameLine(); ImGui::RadioButton("Hue&Saturation", &editor->settings.brushColorMode, BRUSHCOLORMODE_HUE_SATURATION);
 	}
 
 };

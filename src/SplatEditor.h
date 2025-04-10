@@ -211,6 +211,8 @@ struct SplatEditor{
 		bool requestDebugDump            = false;
 		bool enableOverlapped            = true;
 		int splatRenderer                = SPLATRENDERER_3DGS;
+		int intersectionMode             = INTERSECTION_APPROXIMATE;
+		int brushColorMode               = BRUSHCOLORMODE_NORMAL;
 
 		Brush brush;
 		RectSelect rectselect;
@@ -367,6 +369,7 @@ struct SplatEditor{
 	void deleteNode_undoable(shared_ptr<SceneNode> node);
 	shared_ptr<SNSplats> filterToNewLayer_undoable(FilterRules rules);
 	shared_ptr<SNSplats> duplicateLayer_undoable(shared_ptr<SNSplats> node);
+	// shared_ptr<SNSplats> extractLayer_undoable(shared_ptr<SNSplats> node);
 	void merge_undoable(shared_ptr<SceneNode> snsource, shared_ptr<SceneNode> sntarget); 
 
 	// GUI

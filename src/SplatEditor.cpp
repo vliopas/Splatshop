@@ -1433,6 +1433,7 @@ Uniforms SplatEditor::getUniforms(){
 	uniforms.sortEnabled              = settings.sort;
 	uniforms.splatSize                = settings.splatSize;
 	uniforms.cullSmallSplats          = settings.cullSmallSplats;
+	uniforms.brushColorMode           = settings.brushColorMode;
 
 	uniforms.inset.show               = settings.showInset;
 	uniforms.inset.start              = {16 * 60, 16 * 50};
@@ -2008,6 +2009,35 @@ shared_ptr<SNSplats> SplatEditor::duplicateLayer_undoable(shared_ptr<SNSplats> n
 
 	return duplicate;
 }
+
+// // First duplicate to new layer, then delete selection from selected layer.
+// shared_ptr<SNSplats> SplatEditor::extractLayer_undoable(shared_ptr<SNSplats> node){
+
+// 	if(!node) return nullptr;
+
+// 	shared_ptr<SNSplats> duplicate = clone(node.get());
+// 	duplicate->name = format("{}_duplicate", node->name);
+
+// 	scene.world->children.push_back(duplicate);
+
+// 	// this action/lambda keeps the duplicate shared_ptr alive, 
+// 	// meaning the node can only be removed from memory
+// 	// once the history is cleared, or at least this particular action. 
+// 	addAction({
+// 		.undo = [=](){
+// 			this->scene.world->remove(duplicate.get());
+// 		},
+// 		.redo = [=](){
+// 			this->scene.world->children.push_back(duplicate);
+// 		}
+// 	});
+
+// 	// TODO: Clear node's splat GPU memory upon undo, and recreate upon redo. 
+// 	// - As long as the splats have the same order every time, that should be fine.
+// 	//   (other undoable actions such as painting depend on the exact order)
+
+// 	return duplicate;
+// }
 
 // undo: remove newly added node and restore selection to what it was
 //       - store node to delete

@@ -499,7 +499,7 @@ void drawsplats_3dgs_concurrent(
 	for(auto target : targets){
 
 		target.virt_tileIDs->commit(4 * target.numFragments);
-		target.virt_numTilefragments_splatwise_ordered->commit(4 * target.numFragments);
+		target.virt_numTilefragments_splatwise_ordered->commit(4 * target.numVisibleSplats);
 		target.virt_indices->commit(4 * target.numFragments);
 
 		// Unfortunately we can't sort simultaneously, since both use the same alternative sort buffers

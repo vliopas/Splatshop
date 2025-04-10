@@ -47,6 +47,13 @@ constexpr int RENDERMODE_HEATMAP = 3;
 constexpr int RENDERMODE_PRIMITIVES = 4;
 constexpr int RENDERMODE_COLOR_ASYNCMEM = 100;
 
+constexpr int INTERSECTION_APPROXIMATE = 0;
+constexpr int INTERSECTION_3DGS = 1;
+constexpr int INTERSECTION_TIGHTBB = 2;
+
+constexpr int BRUSHCOLORMODE_NORMAL = 0;
+constexpr int BRUSHCOLORMODE_HUE_SATURATION = 1;
+
 constexpr int SPLATRENDERER_3DGS = 0;
 constexpr int SPLATRENDERER_PERSPECTIVE_CORRECT = 1;
 
@@ -492,6 +499,7 @@ struct Uniforms{
 	int showRing;
 	int makePoints;
 	int rendermode;
+	int brushColorMode;
 	uint32_t fragmentCounter;
 	float splatSize;
 	bool disableFrustumCulling;
