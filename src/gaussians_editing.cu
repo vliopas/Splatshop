@@ -267,13 +267,13 @@ void kernel_apply_transformation(
 		if(!isSelected) return;
 	}
 
-	vec3 dscale;
-	quat rotation;
-	vec3 translation;
-	vec3 skew;
-	vec4 perspective;
-	glm::decompose(transform, dscale, rotation, translation, skew, perspective);
-	rotation = glm::conjugate(rotation);
+	vec3 d_scale;
+	quat d_rotation;
+	vec3 d_translation;
+	vec3 d_skew;
+	vec4 d_perspective;
+	glm::decompose(transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+	d_rotation = glm::conjugate(d_rotation);
 
 	{ // TRANSFORM POSITION
 		vec3 pos = model.position[splatIndex];
@@ -289,7 +289,7 @@ void kernel_apply_transformation(
 			model.quaternion[splatIndex].w
 		);
 
-		q = rotation * q;
+		q = d_rotation * q;
 		float l = sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
 		l = 1.0f;
 
@@ -299,11 +299,22 @@ void kernel_apply_transformation(
 		model.quaternion[splatIndex].w = q.z / l;
 	}
 
-	// TODO: Spherical Harmonics
+	if(model.shDegree > 0)
+	{ // SPHERICAL HARMONICS
+		mat3 rotation = glm::mat3_cast(d_rotation);
+		
+		int64_t offset = splatIndex * model.numSHCoefficients;
+		vec3* shs = (vec3*)(model.sphericalHarmonics + offset);
+		vec3 shs_transformed[15];
+		rotateSH(model.shDegree, shs, shs_transformed, rotation);
+
+		int numCoefficients = shDegreeToNumCoefficients(model.shDegree);
+		memcpy(shs, shs_transformed, (numCoefficients - 1) * sizeof(vec3));
+	}
 
 	{
 		vec3 scale = model.scale[splatIndex];
-		scale = scale * dscale;
+		scale = scale * d_scale;
 		model.scale[splatIndex] = scale;
 	}
 }

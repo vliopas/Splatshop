@@ -29,7 +29,6 @@ using namespace std;
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
 #include "math.cuh"
-#include "shutils.cuh"
 
 namespace cg = cooperative_groups;
 
@@ -516,127 +515,224 @@ void kernel_stageSplats(
 		// 	 0.0f
 		// });
 
+		vec3 camdir = normalize(vec3(worldPos) - camPos);
+		camdir = vec3((inverse(model.transform)) * vec4(camdir, 0.0f));
+		harmonics = vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, shs), 0.0f);
 
-		int degree = 2;
+		// vec3 d_scale;
+		// quat d_rotation;
+		// vec3 d_translation;
+		// vec3 d_skew;
+		// vec4 d_perspective;
+		// glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+		// d_rotation = glm::conjugate(d_rotation);
+
+		// mat3 rotation = glm::mat3_cast(d_rotation);
+
+
+		// vec3 shs_transformed[15];
+		// rotateSH(model.shDegree, shs, shs_transformed, rotation);
+
+		// harmonics = vec4(getHarmonics(model.shDegree, model.numSHCoefficients, camdir, shs_transformed), 0.0f);
+
+
+		// int degree = 3;
 		// int degree = model.shDegree;
 
-		bool transformSplatwise;
-		transformSplatwise = true;
-		transformSplatwise = false;
-		transformSplatwise = int(floor(args.uniforms.time)) % 2 == 0;
+		// bool transformSplatwise;
+		// transformSplatwise = false;
+		// transformSplatwise = true;
+		// // transformSplatwise = int(floor(args.uniforms.time)) % 2 == 0;
 
-		auto dp = [](int n, const vec3* a, const float* b){
+		// // if(ndc.x < 0.0f){
+		// // 	transformSplatwise = false;
+		// // }else{
+		// // 	transformSplatwise = true; 
+		// // }
 
-			vec3 sum = {0.0f, 0.0f, 0.0f};
+		// auto dp = [](int n, const vec3* a, const float* b){
 
-			for(int i = 0; i < n; i++){
-				sum = sum + a[i] * b[i];
-			}
+		// 	vec3 sum = {0.0f, 0.0f, 0.0f};
+
+		// 	for(int i = 0; i < n; i++){
+		// 		sum = sum + a[i] * b[i];
+		// 	}
 			
-			return sum;
-		};
+		// 	return sum;
+		// };
 
-		if(!transformSplatwise)
-		{ // normal harmonics
+		// if(!transformSplatwise)
+		// { // normal harmonics
 
-			// by transforming camera
-			vec3 camdir = normalize(vec3(worldPos) - camPos);
-			camdir = vec3((inverse(model.transform)) * vec4(camdir, 0.0f));
+		// 	// by transforming camera
+		// 	vec3 camdir = normalize(vec3(worldPos) - camPos);
+		// 	camdir = vec3((inverse(model.transform)) * vec4(camdir, 0.0f));
 
-			harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs), 0.0f);
+		// 	harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs), 0.0f);
 
-		}else { // transformed harmonics
+		// }else { // transformed harmonics
 
-			// by transforming spherical harmonics
+		// 	// by transforming spherical harmonics
 			
-			// SH rotation code from: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/SHLib.cpp#L1090
-			// LICENSE: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/LICENSE.md (public domain)
-			vec3 camdir = normalize(vec3(worldPos) - camPos);
+		// 	// SH rotation code from: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/SHLib.cpp#L1090
+		// 	// LICENSE: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/LICENSE.md (public domain)
+		// 	vec3 camdir = normalize(vec3(worldPos) - camPos);
 
-			vec3 shs_transformed[15];
+		// 	vec3 shs_transformed[15];
 
-			vec3 d_scale;
-			quat d_rotation;
-			vec3 d_translation;
-			vec3 d_skew;
-			vec4 d_perspective;
-			glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
-			d_rotation = glm::conjugate(d_rotation);
+		// 	vec3 d_scale;
+		// 	quat d_rotation;
+		// 	vec3 d_translation;
+		// 	vec3 d_skew;
+		// 	vec4 d_perspective;
+		// 	glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+		// 	d_rotation = glm::conjugate(d_rotation);
 
-			mat3 rot = glm::mat3_cast(d_rotation);
-			rot = glm::transpose(rot);
+		// 	mat3 rot = glm::mat3_cast(d_rotation);
 
-			float sh1[3][3] = 
-			{
-				{rot[1].y, rot[2].y, rot[0].y},
-				{rot[1].z, rot[2].z, rot[0].z},
-				{rot[1].x, rot[2].x, rot[0].x},
-			};
+		// 	// After struggling for a while with the correct rotation of sh-lib, 
+		// 	// Supersplat's source helped us figure out the correct re-ordering of the rotation, 
+		// 	// specifically the minus signs that were absent in sh-lib
+		// 	// see: https://github.com/playcanvas/supersplat/blob/6f01d82114faaef33fe9c9bf86a746c71d1f6dbf/src/sh-utils.ts#L53
+		// 	float sh1[3][3] = {
+		// 		{ rot[1].y, -rot[2].y,  rot[0].y},
+		// 		{-rot[1].z,  rot[2].z, -rot[0].z},
+		// 		{ rot[1].x, -rot[2].x,  rot[0].x},
+		// 	};
 
-			if(degree > 0)
-			{ // DEGREE 1
-				shs_transformed[0] = dp(3, shs + 0, sh1[0]);
-				shs_transformed[1] = dp(3, shs + 0, sh1[1]);
-				shs_transformed[2] = dp(3, shs + 0, sh1[2]);
-			}
+		// 	// DEGREE 1
+		// 	if(degree > 0){ 
+		// 		shs_transformed[0] = dp(3, shs + 0, sh1[0]);
+		// 		shs_transformed[1] = dp(3, shs + 0, sh1[1]);
+		// 		shs_transformed[2] = dp(3, shs + 0, sh1[2]);
+		// 	}
 
-			if(degree > 1)
-			{ // DEGREE 2
-				float sh2[5][5];
+		// 	// DEGREE 2
+		// 	float sh2[5][5];
+		// 	if(degree > 1){
 
-				sh2[0][0] = kSqrt01_04 * ((sh1[2][2] * sh1[0][0] + sh1[2][0] * sh1[0][2]) + (sh1[0][2] * sh1[2][0] + sh1[0][0] * sh1[2][2]));
-				sh2[0][1] =               (sh1[2][1] * sh1[0][0] + sh1[0][1] * sh1[2][0]);
-				sh2[0][2] = kSqrt03_04 *  (sh1[2][1] * sh1[0][1] + sh1[0][1] * sh1[2][1]);
-				sh2[0][3] =               (sh1[2][1] * sh1[0][2] + sh1[0][1] * sh1[2][2]);
-				sh2[0][4] = kSqrt01_04 * ((sh1[2][2] * sh1[0][2] - sh1[2][0] * sh1[0][0]) + (sh1[0][2] * sh1[2][2] - sh1[0][0] * sh1[2][0]));
+		// 		sh2[0][0] = kSqrt01_04 * ((sh1[2][2] * sh1[0][0] + sh1[2][0] * sh1[0][2]) + (sh1[0][2] * sh1[2][0] + sh1[0][0] * sh1[2][2]));
+		// 		sh2[0][1] =               (sh1[2][1] * sh1[0][0] + sh1[0][1] * sh1[2][0]);
+		// 		sh2[0][2] = kSqrt03_04 *  (sh1[2][1] * sh1[0][1] + sh1[0][1] * sh1[2][1]);
+		// 		sh2[0][3] =               (sh1[2][1] * sh1[0][2] + sh1[0][1] * sh1[2][2]);
+		// 		sh2[0][4] = kSqrt01_04 * ((sh1[2][2] * sh1[0][2] - sh1[2][0] * sh1[0][0]) + (sh1[0][2] * sh1[2][2] - sh1[0][0] * sh1[2][0]));
 
-				shs_transformed[3] = dp(5, shs + 3, sh2[0]);
+		// 		shs_transformed[3] = dp(5, shs + 3, sh2[0]);
 				
-				sh2[1][0] = kSqrt01_04 * ((sh1[1][2] * sh1[0][0] + sh1[1][0] * sh1[0][2]) + (sh1[0][2] * sh1[1][0] + sh1[0][0] * sh1[1][2]));
-				sh2[1][1] =                sh1[1][1] * sh1[0][0] + sh1[0][1] * sh1[1][0];
-				sh2[1][2] = kSqrt03_04 *  (sh1[1][1] * sh1[0][1] + sh1[0][1] * sh1[1][1]);
-				sh2[1][3] =                sh1[1][1] * sh1[0][2] + sh1[0][1] * sh1[1][2];
-				sh2[1][4] = kSqrt01_04 * ((sh1[1][2] * sh1[0][2] - sh1[1][0] * sh1[0][0]) + (sh1[0][2] * sh1[1][2] - sh1[0][0] * sh1[1][0]));
+		// 		sh2[1][0] = kSqrt01_04 * ((sh1[1][2] * sh1[0][0] + sh1[1][0] * sh1[0][2]) + (sh1[0][2] * sh1[1][0] + sh1[0][0] * sh1[1][2]));
+		// 		sh2[1][1] =                sh1[1][1] * sh1[0][0] + sh1[0][1] * sh1[1][0];
+		// 		sh2[1][2] = kSqrt03_04 *  (sh1[1][1] * sh1[0][1] + sh1[0][1] * sh1[1][1]);
+		// 		sh2[1][3] =                sh1[1][1] * sh1[0][2] + sh1[0][1] * sh1[1][2];
+		// 		sh2[1][4] = kSqrt01_04 * ((sh1[1][2] * sh1[0][2] - sh1[1][0] * sh1[0][0]) + (sh1[0][2] * sh1[1][2] - sh1[0][0] * sh1[1][0]));
 
-				shs_transformed[4] = dp(5, shs + 3, sh2[1]);
+		// 		shs_transformed[4] = dp(5, shs + 3, sh2[1]);
 
-				sh2[2][0] = kSqrt01_03 * (sh1[1][2] * sh1[1][0] + sh1[1][0] * sh1[1][2]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) + (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
-				sh2[2][1] = kSqrt04_03 *  sh1[1][1] * sh1[1][0] - kSqrt01_03 * (sh1[2][1] * sh1[2][0] + sh1[0][1] * sh1[0][0]);
-				sh2[2][2] =               sh1[1][1] * sh1[1][1] - kSqrt01_04 * (sh1[2][1] * sh1[2][1] + sh1[0][1] * sh1[0][1]);
-				sh2[2][3] = kSqrt04_03 *  sh1[1][1] * sh1[1][2] - kSqrt01_03 * (sh1[2][1] * sh1[2][2] + sh1[0][1] * sh1[0][2]);
-				sh2[2][4] = kSqrt01_03 * (sh1[1][2] * sh1[1][2] - sh1[1][0] * sh1[1][0]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) + (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
+		// 		sh2[2][0] = kSqrt01_03 * (sh1[1][2] * sh1[1][0] + sh1[1][0] * sh1[1][2]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) + (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
+		// 		sh2[2][1] = kSqrt04_03 *  sh1[1][1] * sh1[1][0] - kSqrt01_03 * (sh1[2][1] * sh1[2][0] + sh1[0][1] * sh1[0][0]);
+		// 		sh2[2][2] =               sh1[1][1] * sh1[1][1] - kSqrt01_04 * (sh1[2][1] * sh1[2][1] + sh1[0][1] * sh1[0][1]);
+		// 		sh2[2][3] = kSqrt04_03 *  sh1[1][1] * sh1[1][2] - kSqrt01_03 * (sh1[2][1] * sh1[2][2] + sh1[0][1] * sh1[0][2]);
+		// 		sh2[2][4] = kSqrt01_03 * (sh1[1][2] * sh1[1][2] - sh1[1][0] * sh1[1][0]) - kSqrt01_12 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) + (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
 
-				shs_transformed[5] = dp(5, shs + 3, sh2[2]);
+		// 		shs_transformed[5] = dp(5, shs + 3, sh2[2]);
 
-				sh2[3][0] = kSqrt01_04 * ((sh1[1][2] * sh1[2][0] + sh1[1][0] * sh1[2][2]) + (sh1[2][2] * sh1[1][0] + sh1[2][0] * sh1[1][2]));
-				sh2[3][1] =                sh1[1][1] * sh1[2][0] + sh1[2][1] * sh1[1][0];
-				sh2[3][2] = kSqrt03_04 *  (sh1[1][1] * sh1[2][1] + sh1[2][1] * sh1[1][1]);
-				sh2[3][3] =                sh1[1][1] * sh1[2][2] + sh1[2][1] * sh1[1][2];
-				sh2[3][4] = kSqrt01_04 * ((sh1[1][2] * sh1[2][2] - sh1[1][0] * sh1[2][0]) + (sh1[2][2] * sh1[1][2] - sh1[2][0] * sh1[1][0]));
+		// 		sh2[3][0] = kSqrt01_04 * ((sh1[1][2] * sh1[2][0] + sh1[1][0] * sh1[2][2]) + (sh1[2][2] * sh1[1][0] + sh1[2][0] * sh1[1][2]));
+		// 		sh2[3][1] =                sh1[1][1] * sh1[2][0] + sh1[2][1] * sh1[1][0];
+		// 		sh2[3][2] = kSqrt03_04 *  (sh1[1][1] * sh1[2][1] + sh1[2][1] * sh1[1][1]);
+		// 		sh2[3][3] =                sh1[1][1] * sh1[2][2] + sh1[2][1] * sh1[1][2];
+		// 		sh2[3][4] = kSqrt01_04 * ((sh1[1][2] * sh1[2][2] - sh1[1][0] * sh1[2][0]) + (sh1[2][2] * sh1[1][2] - sh1[2][0] * sh1[1][0]));
 
-				shs_transformed[6] = dp(5, shs + 3, sh2[3]);
+		// 		shs_transformed[6] = dp(5, shs + 3, sh2[3]);
 
-				sh2[4][0] = kSqrt01_04 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) - (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
-				sh2[4][1] =               (sh1[2][1] * sh1[2][0] - sh1[0][1] * sh1[0][0]);
-				sh2[4][2] = kSqrt03_04 *  (sh1[2][1] * sh1[2][1] - sh1[0][1] * sh1[0][1]);
-				sh2[4][3] =               (sh1[2][1] * sh1[2][2] - sh1[0][1] * sh1[0][2]);
-				sh2[4][4] = kSqrt01_04 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) - (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
+		// 		sh2[4][0] = kSqrt01_04 * ((sh1[2][2] * sh1[2][0] + sh1[2][0] * sh1[2][2]) - (sh1[0][2] * sh1[0][0] + sh1[0][0] * sh1[0][2]));
+		// 		sh2[4][1] =               (sh1[2][1] * sh1[2][0] - sh1[0][1] * sh1[0][0]);
+		// 		sh2[4][2] = kSqrt03_04 *  (sh1[2][1] * sh1[2][1] - sh1[0][1] * sh1[0][1]);
+		// 		sh2[4][3] =               (sh1[2][1] * sh1[2][2] - sh1[0][1] * sh1[0][2]);
+		// 		sh2[4][4] = kSqrt01_04 * ((sh1[2][2] * sh1[2][2] - sh1[2][0] * sh1[2][0]) - (sh1[0][2] * sh1[0][2] - sh1[0][0] * sh1[0][0]));
 
-				shs_transformed[7] = dp(5, shs + 3, sh2[4]);
+		// 		shs_transformed[7] = dp(5, shs + 3, sh2[4]);
+		// 	}
 
-			}
-			
-	
-			
+		// 	// DEGREE 3
+		// 	if(degree > 2){
+		// 		float sh3[7][7];
 
-			harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs_transformed), 0.0f);
-			
+		// 		sh3[0][0] = kSqrt01_04 * ((sh1[2][2] * sh2[0][0] + sh1[2][0] * sh2[0][4]) + (sh1[0][2] * sh2[4][0] + sh1[0][0] * sh2[4][4]));
+		// 		sh3[0][1] = kSqrt03_02 *  (sh1[2][1] * sh2[0][0] + sh1[0][1] * sh2[4][0]);
+		// 		sh3[0][2] = kSqrt15_16 *  (sh1[2][1] * sh2[0][1] + sh1[0][1] * sh2[4][1]);
+		// 		sh3[0][3] = kSqrt05_06 *  (sh1[2][1] * sh2[0][2] + sh1[0][1] * sh2[4][2]);
+		// 		sh3[0][4] = kSqrt15_16 *  (sh1[2][1] * sh2[0][3] + sh1[0][1] * sh2[4][3]);
+		// 		sh3[0][5] = kSqrt03_02 *  (sh1[2][1] * sh2[0][4] + sh1[0][1] * sh2[4][4]);
+		// 		sh3[0][6] = kSqrt01_04 * ((sh1[2][2] * sh2[0][4] - sh1[2][0] * sh2[0][0]) + (sh1[0][2] * sh2[4][4] - sh1[0][0] * sh2[4][0]));
 
-		}
+		// 		shs_transformed[8] = dp(7, shs + 3 + 5, sh3[0]);
+
+		// 		sh3[1][0] = kSqrt01_06 * (sh1[1][2] * sh2[0][0] + sh1[1][0] * sh2[0][4]) + kSqrt01_06 * ((sh1[2][2] * sh2[1][0] + sh1[2][0] * sh2[1][4]) + (sh1[0][2] * sh2[3][0] + sh1[0][0] * sh2[3][4]));
+		// 		sh3[1][1] =               sh1[1][1] * sh2[0][0]                          +               (sh1[2][1] * sh2[1][0] + sh1[0][1] * sh2[3][0]);
+		// 		sh3[1][2] = kSqrt05_08 *  sh1[1][1] * sh2[0][1]                          + kSqrt05_08 *  (sh1[2][1] * sh2[1][1] + sh1[0][1] * sh2[3][1]);
+		// 		sh3[1][3] = kSqrt05_09 *  sh1[1][1] * sh2[0][2]                          + kSqrt05_09 *  (sh1[2][1] * sh2[1][2] + sh1[0][1] * sh2[3][2]);
+		// 		sh3[1][4] = kSqrt05_08 *  sh1[1][1] * sh2[0][3]                          + kSqrt05_08 *  (sh1[2][1] * sh2[1][3] + sh1[0][1] * sh2[3][3]);
+		// 		sh3[1][5] =               sh1[1][1] * sh2[0][4]                          +               (sh1[2][1] * sh2[1][4] + sh1[0][1] * sh2[3][4]);
+		// 		sh3[1][6] = kSqrt01_06 * (sh1[1][2] * sh2[0][4] - sh1[1][0] * sh2[0][0]) + kSqrt01_06 * ((sh1[2][2] * sh2[1][4] - sh1[2][0] * sh2[1][0]) + (sh1[0][2] * sh2[3][4] - sh1[0][0] * sh2[3][0]));
+
+		// 		shs_transformed[9] = dp(7, shs + 3 + 5, sh3[1]);
+
+		// 		sh3[2][0] = kSqrt04_15 * (sh1[1][2] * sh2[1][0] + sh1[1][0] * sh2[1][4]) + kSqrt01_05 * (sh1[0][2] * sh2[2][0] + sh1[0][0] * sh2[2][4]) - kSqrt01_60 * ((sh1[2][2] * sh2[0][0] + sh1[2][0] * sh2[0][4]) - (sh1[0][2] * sh2[4][0] + sh1[0][0] * sh2[4][4]));
+		// 		sh3[2][1] = kSqrt08_05 *  sh1[1][1] * sh2[1][0]                          + kSqrt06_05 *  sh1[0][1] * sh2[2][0] - kSqrt01_10 * (sh1[2][1] * sh2[0][0] - sh1[0][1] * sh2[4][0]);
+		// 		sh3[2][2] =               sh1[1][1] * sh2[1][1]                          + kSqrt03_04 *  sh1[0][1] * sh2[2][1] - kSqrt01_16 * (sh1[2][1] * sh2[0][1] - sh1[0][1] * sh2[4][1]);
+		// 		sh3[2][3] = kSqrt08_09 *  sh1[1][1] * sh2[1][2]                          + kSqrt02_03 *  sh1[0][1] * sh2[2][2] - kSqrt01_18 * (sh1[2][1] * sh2[0][2] - sh1[0][1] * sh2[4][2]);
+		// 		sh3[2][4] =               sh1[1][1] * sh2[1][3]                          + kSqrt03_04 *  sh1[0][1] * sh2[2][3] - kSqrt01_16 * (sh1[2][1] * sh2[0][3] - sh1[0][1] * sh2[4][3]);
+		// 		sh3[2][5] = kSqrt08_05 *  sh1[1][1] * sh2[1][4]                          + kSqrt06_05 *  sh1[0][1] * sh2[2][4] - kSqrt01_10 * (sh1[2][1] * sh2[0][4] - sh1[0][1] * sh2[4][4]);
+		// 		sh3[2][6] = kSqrt04_15 * (sh1[1][2] * sh2[1][4] - sh1[1][0] * sh2[1][0]) + kSqrt01_05 * (sh1[0][2] * sh2[2][4] - sh1[0][0] * sh2[2][0]) - kSqrt01_60 * ((sh1[2][2] * sh2[0][4] - sh1[2][0] * sh2[0][0]) - (sh1[0][2] * sh2[4][4] - sh1[0][0] * sh2[4][0]));
+
+		// 		shs_transformed[10] = dp(7, shs + 3 + 5, sh3[2]);
+
+		// 		sh3[3][0] = kSqrt03_10 * (sh1[1][2] * sh2[2][0] + sh1[1][0] * sh2[2][4]) - kSqrt01_10 * ((sh1[2][2] * sh2[3][0] + sh1[2][0] * sh2[3][4]) + (sh1[0][2] * sh2[1][0] + sh1[0][0] * sh2[1][4]));
+		// 		sh3[3][1] = kSqrt09_05 *  sh1[1][1] * sh2[2][0]                          - kSqrt03_05 *  (sh1[2][1] * sh2[3][0] + sh1[0][1] * sh2[1][0]);
+		// 		sh3[3][2] = kSqrt09_08 *  sh1[1][1] * sh2[2][1]                          - kSqrt03_08 *  (sh1[2][1] * sh2[3][1] + sh1[0][1] * sh2[1][1]);
+		// 		sh3[3][3] =               sh1[1][1] * sh2[2][2]                          - kSqrt01_03 *  (sh1[2][1] * sh2[3][2] + sh1[0][1] * sh2[1][2]);
+		// 		sh3[3][4] = kSqrt09_08 *  sh1[1][1] * sh2[2][3]                          - kSqrt03_08 *  (sh1[2][1] * sh2[3][3] + sh1[0][1] * sh2[1][3]);
+		// 		sh3[3][5] = kSqrt09_05 *  sh1[1][1] * sh2[2][4]                          - kSqrt03_05 *  (sh1[2][1] * sh2[3][4] + sh1[0][1] * sh2[1][4]);
+		// 		sh3[3][6] = kSqrt03_10 * (sh1[1][2] * sh2[2][4] - sh1[1][0] * sh2[2][0]) - kSqrt01_10 * ((sh1[2][2] * sh2[3][4] - sh1[2][0] * sh2[3][0]) + (sh1[0][2] * sh2[1][4] - sh1[0][0] * sh2[1][0]));
+
+		// 		shs_transformed[11] = dp(7, shs + 3 + 5, sh3[3]);
+
+		// 		sh3[4][0] = kSqrt04_15 * (sh1[1][2] * sh2[3][0] + sh1[1][0] * sh2[3][4]) + kSqrt01_05 * (sh1[2][2] * sh2[2][0] + sh1[2][0] * sh2[2][4]) - kSqrt01_60 * ((sh1[2][2] * sh2[4][0] + sh1[2][0] * sh2[4][4]) + (sh1[0][2] * sh2[0][0] + sh1[0][0] * sh2[0][4]));
+		// 		sh3[4][1] = kSqrt08_05 *  sh1[1][1] * sh2[3][0]                          + kSqrt06_05 *  sh1[2][1] * sh2[2][0] - kSqrt01_10 * (sh1[2][1] * sh2[4][0] + sh1[0][1] * sh2[0][0]);
+		// 		sh3[4][2] =               sh1[1][1] * sh2[3][1]                          + kSqrt03_04 *  sh1[2][1] * sh2[2][1] - kSqrt01_16 * (sh1[2][1] * sh2[4][1] + sh1[0][1] * sh2[0][1]);
+		// 		sh3[4][3] = kSqrt08_09 *  sh1[1][1] * sh2[3][2]                          + kSqrt02_03 *  sh1[2][1] * sh2[2][2] - kSqrt01_18 * (sh1[2][1] * sh2[4][2] + sh1[0][1] * sh2[0][2]);
+		// 		sh3[4][4] =               sh1[1][1] * sh2[3][3]                          + kSqrt03_04 *  sh1[2][1] * sh2[2][3] - kSqrt01_16 * (sh1[2][1] * sh2[4][3] + sh1[0][1] * sh2[0][3]);
+		// 		sh3[4][5] = kSqrt08_05 *  sh1[1][1] * sh2[3][4]                          + kSqrt06_05 *  sh1[2][1] * sh2[2][4] - kSqrt01_10 * (sh1[2][1] * sh2[4][4] + sh1[0][1] * sh2[0][4]);
+		// 		sh3[4][6] = kSqrt04_15 * (sh1[1][2] * sh2[3][4] - sh1[1][0] * sh2[3][0]) + kSqrt01_05 * (sh1[2][2] * sh2[2][4] - sh1[2][0] * sh2[2][0]) - kSqrt01_60 * ((sh1[2][2] * sh2[4][4] - sh1[2][0] * sh2[4][0]) + (sh1[0][2] * sh2[0][4] - sh1[0][0] * sh2[0][0]));
+
+		// 		shs_transformed[12] = dp(7, shs + 3 + 5, sh3[4]);
+
+		// 		sh3[5][0] = kSqrt01_06 * (sh1[1][2] * sh2[4][0] + sh1[1][0] * sh2[4][4]) + kSqrt01_06 * ((sh1[2][2] * sh2[3][0] + sh1[2][0] * sh2[3][4]) - (sh1[0][2] * sh2[1][0] + sh1[0][0] * sh2[1][4]));
+		// 		sh3[5][1] =               sh1[1][1] * sh2[4][0]                          +               (sh1[2][1] * sh2[3][0] - sh1[0][1] * sh2[1][0]);
+		// 		sh3[5][2] = kSqrt05_08 *  sh1[1][1] * sh2[4][1]                          + kSqrt05_08 *  (sh1[2][1] * sh2[3][1] - sh1[0][1] * sh2[1][1]);
+		// 		sh3[5][3] = kSqrt05_09 *  sh1[1][1] * sh2[4][2]                          + kSqrt05_09 *  (sh1[2][1] * sh2[3][2] - sh1[0][1] * sh2[1][2]);
+		// 		sh3[5][4] = kSqrt05_08 *  sh1[1][1] * sh2[4][3]                          + kSqrt05_08 *  (sh1[2][1] * sh2[3][3] - sh1[0][1] * sh2[1][3]);
+		// 		sh3[5][5] =               sh1[1][1] * sh2[4][4]                          +               (sh1[2][1] * sh2[3][4] - sh1[0][1] * sh2[1][4]);
+		// 		sh3[5][6] = kSqrt01_06 * (sh1[1][2] * sh2[4][4] - sh1[1][0] * sh2[4][0]) + kSqrt01_06 * ((sh1[2][2] * sh2[3][4] - sh1[2][0] * sh2[3][0]) - (sh1[0][2] * sh2[1][4] - sh1[0][0] * sh2[1][0]));
+
+		// 		shs_transformed[13] = dp(7, shs + 3 + 5, sh3[5]);
+
+		// 		sh3[6][0] = kSqrt01_04 * ((sh1[2][2] * sh2[4][0] + sh1[2][0] * sh2[4][4]) - (sh1[0][2] * sh2[0][0] + sh1[0][0] * sh2[0][4]));
+		// 		sh3[6][1] = kSqrt03_02 *  (sh1[2][1] * sh2[4][0] - sh1[0][1] * sh2[0][0]);
+		// 		sh3[6][2] = kSqrt15_16 *  (sh1[2][1] * sh2[4][1] - sh1[0][1] * sh2[0][1]);
+		// 		sh3[6][3] = kSqrt05_06 *  (sh1[2][1] * sh2[4][2] - sh1[0][1] * sh2[0][2]);
+		// 		sh3[6][4] = kSqrt15_16 *  (sh1[2][1] * sh2[4][3] - sh1[0][1] * sh2[0][3]);
+		// 		sh3[6][5] = kSqrt03_02 *  (sh1[2][1] * sh2[4][4] - sh1[0][1] * sh2[0][4]);
+		// 		sh3[6][6] = kSqrt01_04 * ((sh1[2][2] * sh2[4][4] - sh1[2][0] * sh2[4][0]) - (sh1[0][2] * sh2[0][4] - sh1[0][0] * sh2[0][0]));
+
+		// 		shs_transformed[14] = dp(7, shs + 3 + 5, sh3[6]);
+		// 	}
+
+		// 	harmonics = vec4(getHarmonics(degree, model.numSHCoefficients, camdir, shs_transformed), 0.0f);
+		// }
 
 
-		// vec4 colBaked = color + 1.0f * harmonics;
-		vec4 colBaked = 10.0f * harmonics;
+		vec4 colBaked = color + 1.0f * harmonics;
+		// vec4 colBaked = 50.0f * harmonics;
 		colBaked = glm::max(colBaked, 0.0f);
 		colBaked.a = color.a;
 
