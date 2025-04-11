@@ -1218,7 +1218,8 @@ void SplatEditor::sortSplatsDevice(SNSplats* node, bool putDeletedLast){
 	GaussianData data = node->dmng.data;
 	Box3 aabb = node->aabb;
 
-	int64_t maxBytesPerSplatAttribute = max(16llu, data.numSHCoefficients * sizeof(float));
+	// int64_t maxBytesPerSplatAttribute = max(16llu, data.numSHCoefficients * sizeof(float));
+	int64_t maxBytesPerSplatAttribute = max<unsigned long long>(16llu, data.numSHCoefficients * sizeof(float));
 
 	#define USE_32BIT
 
