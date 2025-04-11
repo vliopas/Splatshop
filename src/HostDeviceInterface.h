@@ -47,6 +47,13 @@ constexpr int RENDERMODE_HEATMAP = 3;
 constexpr int RENDERMODE_PRIMITIVES = 4;
 constexpr int RENDERMODE_COLOR_ASYNCMEM = 100;
 
+constexpr int INTERSECTION_APPROXIMATE = 0;
+constexpr int INTERSECTION_3DGS = 1;
+constexpr int INTERSECTION_TIGHTBB = 2;
+
+constexpr int BRUSHCOLORMODE_NORMAL = 0;
+constexpr int BRUSHCOLORMODE_HUE_SATURATION = 1;
+
 constexpr int SPLATRENDERER_3DGS = 0;
 constexpr int SPLATRENDERER_PERSPECTIVE_CORRECT = 1;
 
@@ -152,13 +159,13 @@ struct ColorCorrection{
 
 // constexpr int STAGEDATA_BITS = 24;
 
-// #define STAGEDATA_16BIT
-// #define STAGEDATA_20BIT
-#define STAGEDATA_24BIT
+// #define STAGEDATA_16BYTE
+// #define STAGEDATA_20BYTE
+#define STAGEDATA_24BYTE
 
 // #define FRAGWISE_ORDERING
 
-#if defined(STAGEDATA_16BIT)
+#if defined(STAGEDATA_16BYTE)
 	struct StageData{
 		glm::i16vec2 basisvector1_encoded;
 		glm::i16vec2 imgPos_encoded;
@@ -167,7 +174,7 @@ struct ColorCorrection{
 		int16_t basisvector2_encoded;
 		int16_t depth_encoded;
 	};
-#elif defined(STAGEDATA_20BIT)
+#elif defined(STAGEDATA_20BYTE)
 	struct StageData{
 		glm::i16vec2 basisvector1_encoded;
 		glm::i16vec2 basisvector2_encoded;
@@ -176,7 +183,7 @@ struct ColorCorrection{
 		// uint32_t flags;
 		 float depth;
 	};
-#elif defined(STAGEDATA_24BIT)
+#elif defined(STAGEDATA_24BYTE)
 struct StageData {
 	glm::i16vec2 basisvector1_encoded;
 	glm::i16vec2 basisvector2_encoded;
@@ -184,8 +191,12 @@ struct StageData {
 	uint32_t color;
 	uint32_t flags;
 	float depth;
-	// uint32_t padding0;
-	// uint32_t padding1;
+
+	// // Padding to 64 byte
+	// float padding[10];
+
+	// // Padding to 80 byte
+	// float padding[14];
 };
 #endif
 struct StageData_perspectivecorrect {
@@ -363,6 +374,8 @@ struct GaussianData{
 	bool visible = true;
 	bool locked = false;
 	bool writeDepth = true;
+	int shDegree = 0;
+	int numSHCoefficients = 0;
 
 	mat4 transform = mat4(1.0f);
 
@@ -370,16 +383,18 @@ struct GaussianData{
 	vec3 max;
 
 	// Splat Attributes
-	vec3* position           = nullptr;
-	vec3* scale              = nullptr;
-	vec4* quaternion         = nullptr;
-	Color* color             = nullptr;
+	vec3* position             = nullptr;
+	vec3* scale                = nullptr;
+	vec4* quaternion           = nullptr;
+	Color* color               = nullptr;
+	uint32_t* color_resolved   = nullptr;
+	float* sphericalHarmonics  = nullptr;
 
-	Cov3DElements* cov3d     = nullptr;
+	Cov3DElements* cov3d       = nullptr;
 
 	// auxilliary attributes, used for rendering and modification
-	float* depth             = nullptr;
-	uint32_t* flags          = nullptr;
+	float* depth               = nullptr;
+	uint32_t* flags            = nullptr;
 	// StageData* basisvectorsNstuff = nullptr;
 };
 
@@ -484,6 +499,7 @@ struct Uniforms{
 	int showRing;
 	int makePoints;
 	int rendermode;
+	int brushColorMode;
 	uint32_t fragmentCounter;
 	float splatSize;
 	bool disableFrustumCulling;

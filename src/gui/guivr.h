@@ -561,7 +561,7 @@ void makeBrushesVR(ImguiPage* page){
 		editor->deleteSelection_undoable();
 	}
 	
-
+	// ImGui::SliderFloat("Brush Size", &editor->settings.vr_brushSize, 0.01f, 0.3f);
 
 	ImGui::PopFont();
 	ImGui::PopStyleColor();
@@ -664,6 +664,12 @@ void makePaintingVR(ImguiPage* page){
 	editor->settings.brush.color.g = pickedColor.y;
 	editor->settings.brush.color.b = pickedColor.z;
 	editor->settings.brush.color.a = pickedColor.w;
+
+	ImGui::Text("Mode: ");
+	ImGui::SameLine(); ImGui::RadioButton("Normal##guivr", &editor->settings.brushColorMode, BRUSHCOLORMODE_NORMAL);
+	ImGui::SameLine(); ImGui::RadioButton("Hue&Saturation##guivr", &editor->settings.brushColorMode, BRUSHCOLORMODE_HUE_SATURATION);
+
+	ImGui::SliderFloat("Brush Size#makePainting", &editor->settings.vr_brushSize, 0.01f, 0.3f);
 
 	ImGui::PopFont();
 	ImGui::PopStyleColor();

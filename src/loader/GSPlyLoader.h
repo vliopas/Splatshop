@@ -40,6 +40,25 @@ struct GSPlyHeader{
 
 struct GSPlyLoader{
 
+	static int shDegreeToNumCoefficients(int degree){
+
+		if(degree == 0) return 1;
+		if(degree == 1) return 4;
+		if(degree == 2) return 9;
+		if(degree == 3) return 16;
+
+		return 0;
+	}
+
+	static int numCoefficientsToShDegree(int numCoefficients){
+		if(numCoefficients == 1) return 0;
+		if(numCoefficients == 4) return 1;
+		if(numCoefficients == 9) return 2;
+		if(numCoefficients == 16) return 3;
+
+		return 0;
+	}
+
 	static GSPlyHeader readHeader(string path){
 
 		int64_t numSplats = 0;
@@ -158,6 +177,12 @@ struct GSPlyLoader{
 		println("shDegree:          {}", header.shDegree);
 		println("numSHCoefficients: {}", header.numSHCoefficients);
 
+		// deactivate SHs
+		// header.numSHCoefficients = 0;
+		// header.shDegree = 0;
+
+		int64_t numSHBytes = header.numSHCoefficients * sizeof(float);
+
 		shared_ptr<Splats> splats = make_shared<Splats>();
 
 		splats->name = fs::path(path).filename().string();
@@ -169,14 +194,14 @@ struct GSPlyLoader{
 		splats->numSHCoefficients = header.numSHCoefficients;
 		splats->shDegree          = header.shDegree;
 
-
 		splats->position = make_shared<Buffer>(header.numSplats * sizeof(vec3));
 		splats->scale    = make_shared<Buffer>(header.numSplats * sizeof(vec3));
 		splats->rotation = make_shared<Buffer>(header.numSplats * sizeof(vec4));
 		splats->color    = make_shared<Buffer>(header.numSplats *  8llu);
-		splats->SHs      = nullptr;
+		splats->SHs      = make_shared<Buffer>(header.numSplats *  numSHBytes);
+
 		
-		auto t = jthread([header, path, splats](){
+		auto t = jthread([header, path, splats, numSHBytes](){
 
 			double t_start = now();
 
@@ -260,17 +285,39 @@ struct GSPlyLoader{
 					float g = buffer.get<float>(srcOffset + header.OFFSETS_DC + 4llu);
 					float b = buffer.get<float>(srcOffset + header.OFFSETS_DC + 8llu);
 
-					r = clamp(0.5 + 0.28209479177387814 * r, 0.0, 1.0);
-					g = clamp(0.5 + 0.28209479177387814 * g, 0.0, 1.0);
-					b = clamp(0.5 + 0.28209479177387814 * b, 0.0, 1.0);
+					float CO = 0.28209479177387814; // spherical harmonics coefficient
+					r = clamp(0.5 + CO * r, 0.0, 1.0);
+					g = clamp(0.5 + CO * g, 0.0, 1.0);
+					b = clamp(0.5 + CO * b, 0.0, 1.0);
 
 					splats->color->set<uint16_t>(clamp(65536.0f * r, 0.0f, 65535.0f), 8llu * i + 0llu);
 					splats->color->set<uint16_t>(clamp(65536.0f * g, 0.0f, 65535.0f), 8llu * i + 2llu);
 					splats->color->set<uint16_t>(clamp(65536.0f * b, 0.0f, 65535.0f), 8llu * i + 4llu);
 				}
 
-				// if(splats.SHs)
-				// memcpy(splats.SHs->ptr + numSHBytes * i  , buffer.ptr + srcOffset + header.OFFSETS_SHs       , numSHBytes);
+				if(splats->SHs){
+					// SHs are stored per splat but in [rrr..][ggg..][bbb..] fashion. 
+					// We need to rearange to [rgb][rgb]...
+
+					for(int j = 0; j < header.numSHCoefficients / 3; j++){
+
+						int64_t numVec3s = header.numSHCoefficients / 3;
+
+						float a = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (0 * numVec3s + j));
+						float b = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (1 * numVec3s + j));
+						float c = buffer.get<float>(srcOffset + header.OFFSETS_SHs + 4 * (2 * numVec3s + j));
+
+						splats->SHs->set<float>(a, numSHBytes * i + 12 * j + 0);
+						splats->SHs->set<float>(b, numSHBytes * i + 12 * j + 4);
+						splats->SHs->set<float>(c, numSHBytes * i + 12 * j + 8);
+					}
+
+					// memcpy(
+					// 	splats->SHs->ptr + numSHBytes * i, 
+					// 	buffer.ptr + srcOffset + header.OFFSETS_SHs, 
+					// 	numSHBytes
+					// );
+				}
 
 				float opacity = buffer.get<float>(srcOffset + header.OFFSETS_OPACITY);
 				opacity = (1.0 / (1.0 + std::exp(-opacity)));
@@ -289,9 +336,6 @@ struct GSPlyLoader{
 
 		// t.join();
 		t.detach();
-
-		splats->shDegree = 0;
-		splats->numSHCoefficients = 0;
 
 		return splats;
 	}

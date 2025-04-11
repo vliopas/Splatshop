@@ -1,5 +1,24 @@
 {
 	"files.associations": {
-		"memory": "cpp"
+		"memory": "cpp",
+		"xiosbase": "cpp",
+		"filesystem": "cpp",
+		"charconv": "cpp",
+		"xmemory": "cpp",
+		"iterator": "cpp",
+		"xhash": "cpp",
+		"xtree": "cpp",
+		"chrono": "cpp",
+		"algorithm": "cpp",
+		"execution": "cpp",
+		"locale": "cpp",
+		"optional": "cpp",
+		"ranges": "cpp",
+		"cmath": "cpp",
+		"utility": "cpp",
+		"xutility": "cpp",
+		"ostream": "cpp",
+		"print": "cpp",
+		"xstring": "cpp"
 	}
 }

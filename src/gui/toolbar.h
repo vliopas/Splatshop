@@ -718,6 +718,21 @@ void SplatEditor::makeToolbar(){
 				editor->settings.requestDebugDump = true;
 			}
 
+			ImGui::SameLine();
+			ImGui::Checkbox("SoA", &editor->settings.renderSoA);
+			ImGui::SameLine();
+			ImGui::Checkbox("Bandwidth", &editor->settings.renderBandwidth);
+
+
+			// ImGui::SameLine();
+			// ImGui::Checkbox("FragIntersections", &editor->settings.renderFragIntersections);
+
+			ImGui::SameLine();
+			ImGui::Text("Intersection: ");
+			ImGui::RadioButton("Approx.##intersection", &editor->settings.intersectionMode, INTERSECTION_APPROXIMATE); ImGui::SameLine();
+			ImGui::RadioButton("3DGS##intersection", &editor->settings.intersectionMode, INTERSECTION_3DGS); ImGui::SameLine();
+			ImGui::RadioButton("TightBB##intersection", &editor->settings.intersectionMode, INTERSECTION_TIGHTBB); ImGui::SameLine();
+
 			endSection();
 		}
 

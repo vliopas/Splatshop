@@ -211,11 +211,14 @@ struct SplatEditor{
 		bool requestDebugDump            = false;
 		bool enableOverlapped            = true;
 		int splatRenderer                = SPLATRENDERER_3DGS;
+		int intersectionMode             = INTERSECTION_APPROXIMATE;
+		int brushColorMode               = BRUSHCOLORMODE_NORMAL;
 
 		Brush brush;
 		RectSelect rectselect;
 		ColorCorrection colorCorrection;
-		bool hideGUI = false;
+		bool hideGUI                     = false;
+		float vr_brushSize               = 0.1f;
 
 		// - We need to be able to disable shortcuts while typing, for example.
 		// - Actions at the end of a frame (e.g. processing an opened context menu) may want to disable shortcuts for as long as context menu is open.
@@ -238,6 +241,10 @@ struct SplatEditor{
 
 		bool showInset = false;
 		float dbg_factor = 1.0f;
+		bool renderSoA = false;
+		bool renderBandwidth = false;
+		bool renderFragIntersections = false;
+
 	} settings;
 
 	struct {
@@ -362,6 +369,7 @@ struct SplatEditor{
 	void deleteNode_undoable(shared_ptr<SceneNode> node);
 	shared_ptr<SNSplats> filterToNewLayer_undoable(FilterRules rules);
 	shared_ptr<SNSplats> duplicateLayer_undoable(shared_ptr<SNSplats> node);
+	// shared_ptr<SNSplats> extractLayer_undoable(shared_ptr<SNSplats> node);
 	void merge_undoable(shared_ptr<SceneNode> snsource, shared_ptr<SceneNode> sntarget); 
 
 	// GUI

@@ -16,29 +16,12 @@ void kernel_render_heatmap(
 	int tiles_x   = int(width + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
 	int tiles_y   = int(height + TILE_SIZE_3DGS - 1) / int(TILE_SIZE_3DGS);
 	int numTiles  = tiles_x * tiles_y;
-
-	struct RasterizationData{
-		vec2 dir1;
-		vec2 dir2;
-		vec2 imgpos;
-		float depth;
-		uint32_t flags;
-		vec4 colors;
-	};
-
-	__shared__ RasterizationData sh_rasterdata[PREFETCH_COUNT];
-	__shared__ float sh_maxRemainingOpacity;
-
-	sh_maxRemainingOpacity = 1.0;
-
-	int tileID = blockIdx.x;
-	
-	Tile tile = tiles[tileID];
+	int tileID    = blockIdx.x;
+	Tile tile     = tiles[tileID];
 
 	// tile coordinates
 	int tile_x = tileID % tiles_x;
 	int tile_y = tileID / tiles_x;
-	// int tileID = tile_x + tile_y * tiles_x;
 
 	// this thread's pixel coordinate within tile
 	int tilePixelIndex = threadIdx.x;
@@ -55,123 +38,6 @@ void kernel_render_heatmap(
 	int numPointsInTile = tile.lastIndex - tile.firstIndex + 1;
 	if(tile.firstIndex > tile.lastIndex) {
 		numPointsInTile = 0;
-		// return;
-	}
-
-	int iterations = ((numPointsInTile + PREFETCH_COUNT - 1) / PREFETCH_COUNT);
-	// iterations = min(iterations, 10);
-
-	// uint32_t C = target.framebuffer[pixelID] & 0xffffffff;
-	vec4 pixel = vec4{0.0f, 0.0f, 0.0f, 0.0f};
-	float depth = Infinity;
-	if(pixel_x < width && pixel_y < height){
-		depth = __int_as_float(target.framebuffer[pixelID] >> 32);
-	}
-	float remainingOpacity = 1.0f;
-	int numProcessed = 0;
-
-	// iterate through all the splats
-	// - 256 threads -> 256 splats at a time
-	for(int iteration = 0; iteration < iterations; iteration++){
-
-		int index = PREFETCH_COUNT * iteration + threadIdx.x;
-
-		// if(iteration > 50){
-		// 	if(iteration % 2 == 0) iteration++;
-		// }
-
-		__syncthreads();
-
-		// - load splats into shared memory
-		// - each thread of the block loads one splat
-		// - precompute stuff that is later used by all pixels/threads in tile
-		if(index < numPointsInTile && block.thread_rank() < PREFETCH_COUNT){
-
-			int splatIndex = indices[tile.firstIndex + index];
-
-			auto stageData = stagedatas[splatIndex];
-			
-			uint32_t C = stageData.color;
-			uint8_t* rgba = (uint8_t*)&C;
-
-			vec2 basisvector1, basisvector2;
-			float depth;
-			decode_stagedata(stageData, basisvector1, basisvector2, depth);
-
-			RasterizationData data;
-			data.dir1 = normalize(basisvector1) / length(basisvector1);
-			data.dir2 = normalize(basisvector2) / length(basisvector2);
-			data.imgpos = vec2(stageData.imgPos_encoded) / 10.0f;
-			data.depth = depth;
-			// data.flags = stageData.flags;
-			data.colors = vec4{
-				((C >>  0) & 0xff) / 255.0f,
-				((C >>  8) & 0xff) / 255.0f,
-				((C >> 16) & 0xff) / 255.0f,
-				((C >> 24) & 0xff) / 255.0f,
-			};
-
-			sh_rasterdata[threadIdx.x] = data;
-		}
-
-		int splatsInSharedMemory = min(numPointsInTile - PREFETCH_COUNT * iteration, PREFETCH_COUNT);
-
-		__syncthreads();
-
-		// now iterate with all threads of block through all splats.
-		// i.e., all 256 threads process first splat, then all 256 threads process second, ...
-		uint64_t t_start_draw = nanotime();
-		for(int i = 0; i < splatsInSharedMemory; i++)
-		{
-			auto rasterdata = sh_rasterdata[i];
-			vec2 imgCoords = rasterdata.imgpos;
-
-			vec2 pFrag = {fpixel_x - imgCoords.x, fpixel_y - imgCoords.y};
-
-			float sT = dot(rasterdata.dir1, pFrag); 
-			float sB = dot(rasterdata.dir2, pFrag); 
-			float w = (sT * sT + sB * sB);
-
-			numProcessed++;
-
-			// if(rasterdata.depth > depth) break;
-			if(pixel_x >= width && pixel_y >= height) break;
-			
-			// Splat boundary at w = 1.0. The remaining part of the gaussian is discarded.
-			if(w < 1.0f)
-			{
-				vec4 splatColor = rasterdata.colors;
-
-				w = 1.0f - sqrt(w);
-				remainingOpacity = 1.0f - pixel.w;
-
-				if(args.uniforms.showRing && w < 0.05f){
-					splatColor.a = 1.0f;
-					w = 1.0f;
-				}
-
-				pixel.r += w * remainingOpacity * splatColor.a * splatColor.r * 255.0f;
-				pixel.g += w * remainingOpacity * splatColor.a * splatColor.g * 255.0f;
-				pixel.b += w * remainingOpacity * splatColor.a * splatColor.b * 255.0f;
-				pixel.w += w * remainingOpacity * splatColor.a;
-				
-				// update depth buffer
-				if(remainingOpacity < 0.030f)
-				if((rasterdata.flags & FLAGS_DISABLE_DEPTHWRITE) == 0)
-				if(pixel_x < width && pixel_y < height)
-				{
-					depth = rasterdata.depth;
-					uint64_t udepth = __float_as_uint(depth);
-					uint64_t pixel = (udepth << 32) | 0x00000000;
-					
-					target.framebuffer[pixelID] = pixel;
-					
-					// break;
-				}
-			}
-		}
-
-		__syncthreads();
 	}
 
 	vec3 SPECTRAL[11] = {
@@ -195,13 +61,7 @@ void kernel_render_heatmap(
 		uint8_t* rgba = (uint8_t*)&color;
 
 		color = target.framebuffer[pixelID] & 0xffffffff;
-
-		if(args.uniforms.showTiles)
-		if(tile_pixel_x == 15 || tile_pixel_y == 15)
-		{
-			pixel = pixel * 0.5f;
-			pixel.w = 255.0f;
-		}
+		color = 0xff0000ff;
 
 		uint32_t C = target.framebuffer[pixelID] & 0xffffffff;
 		vec4 oldPixel = vec4{
@@ -211,14 +71,24 @@ void kernel_render_heatmap(
 			(C >> 24) & 0xff,
 		};
 
-		rgba[0] = numProcessed;
 		rgba[3] = 255;
 
 		// int cindex = numProcessed / 1000.0f;
-		int cindex = log10(float(numProcessed)) / 2.0f;
-		cindex = pow(float(numProcessed), 0.5f) * 0.05f;
+		int cindex = log10(float(numPointsInTile)) / 2.0f;
+		cindex = pow(float(numPointsInTile), 0.5f) * 0.05f;
 		// cindex = pow(float(30'000), 0.5f) * 0.05f;
 		cindex = clamp(cindex, 0, 10);
+
+		cindex = 0;
+		if(numPointsInTile < 10) cindex = 1;
+		else if(numPointsInTile <   100) cindex = 2;
+		else if(numPointsInTile <  1000) cindex = 3;
+		else if(numPointsInTile <  2000) cindex = 4;
+		else if(numPointsInTile <  4000) cindex = 5;
+		else if(numPointsInTile <  8000) cindex = 6;
+		else if(numPointsInTile < 16000) cindex = 7;
+		else if(numPointsInTile < 32000) cindex = 8;
+		else if(numPointsInTile < 64000) cindex = 9;
 
 		rgba[0] = SPECTRAL[10 - cindex].x;
 		rgba[1] = SPECTRAL[10 - cindex].y;
@@ -236,9 +106,7 @@ void kernel_render_heatmap(
 		pixelValue = pixelValue & 0xffffffff'00000000;
 		pixelValue = pixelValue | color;
 
-
-		target.framebuffer[pixelID] = pixelValue;
-		
+		target.framebuffer[pixelID] = pixelValue;	
 	}
 
 	// double nanos = double(nanotime() - t_start);

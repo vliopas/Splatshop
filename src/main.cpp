@@ -50,7 +50,9 @@ void initScene() {
 	// SplatsyFilesLoader::load("./splatmodels_lantern/scene.json", editor->scene, *Runtime::controls);
 
 	// string path = "./gaussians_w_pca.ply";
-	string path = "./splatmodels/scene.json";
+	// string path = "./splatmodels/scene.json";
+	// string path = "E:/resources/gaussian_splats/garden.ply";
+	string path = "E:/resources/splats/gardentable.ply";
 	// string path = "./splatmodels_3dgs_and_perspcorrect/scene.json";
 	// string path = "/home/hahlbohm/code/nerficg_public/nerficg/output/HTGS/htgs_garden_2025-03-06-20-25-48/gaussians.ply";
 	// string path = "F:/SplatEditor/city_gaussians_mc_aerial_c36.ply";
@@ -75,7 +77,7 @@ void initScene() {
 
 	
 	// {// Lot's of gardens
-	// 	string path = "./splatmodels_garden/splats/garden.ply.ply";
+	// 	string path = "./garden.ply";
 
 	// 	for(int i = 0; i < 5; i++)
 	// 	for(int j = 0; j < 5; j++)
@@ -83,7 +85,7 @@ void initScene() {
 	// 		auto splats = GSPlyLoader::load(path);
 	// 		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
 
-	// 		node->transform = translate(vec3{float(35.0f * i), float(30.0f * j), 0.0f});
+	// 		node->transform = translate(vec3{float(30.0f * i), float(25.0f * j), 0.0f});
 
 	// 		editor->scene.world->children.push_back(node);
 	// 	}
@@ -103,14 +105,14 @@ void initScene() {
 	// 	string path = "E:/resources/splats/city_gaussians_mc_aerial_c36.ply";
 	// 	auto splats = GSPlyLoader::load(path);
 
+	// 	shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+
 	// 	mat4 world = {
 	// 		-0.117,     -0.009,      0.000,      0.000,
 	// 		 0.009,     -0.117,      0.000,      0.000,
 	// 		 0.000,      0.000,      0.118,      0.000,
 	// 		-0.234,     -0.243,      0.166,      1.000
 	// 	};
-
-	// 	shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
 
 	// 	node->transform = world * mat4{
 	// 		1.000,      0.000,      0.000,      0.000,
@@ -134,7 +136,7 @@ void initScene() {
 
 	
 	// { // CAMPUS
-	// 	string path = "F:/Campus/point_cloud.ply";
+	// 	string path = "E:/resources/splats/campus.ply";
 
 	// 	if(fs::exists(path)){
 	// 		shared_ptr<Splats> splats = GSPlyLoader::load(path);

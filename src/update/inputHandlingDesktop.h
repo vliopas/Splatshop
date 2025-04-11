@@ -95,6 +95,8 @@ void SplatEditor::inputHandlingDesktop(){
 					editor->duplicateLayer_undoable(node);
 				});
 			}
+		}else if(isCtrlDown && Runtime::getKeyAction('a') == GLFW_PRESS){
+			editor->selectAll_undoable();
 		}else if(isCtrlDown && Runtime::getKeyAction('e') == GLFW_PRESS){
 
 			shared_ptr<SceneNode> selected = editor->getSelectedNode();

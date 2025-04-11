@@ -18,7 +18,7 @@ using namespace std;
 #include "./libs/glm/glm/gtc/matrix_transform.hpp"
 // #include "./libs/glm/glm/gtc/matrix_access.hpp"
 #include "./libs/glm/glm/gtx/transform.hpp"
-// #include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "./libs/glm/glm/gtc/quaternion.hpp"
 #include "./libs/glm/glm/gtx/matrix_decompose.hpp"
 
 #include "utils.cuh"
@@ -88,34 +88,6 @@ bool getBit(void* buffer, uint32_t bitIndex){
 	bool isSet = ((word >> localBitIndex) & 1) == 1;
 
 	return isSet;
-}
-
-// TODO: can we remove this with a glm equivalent?
-mat3 quatToMat3(float qw, float qx, float qy, float qz){
-	float qxx = qx * qx;
-	float qyy = qy * qy;
-	float qzz = qz * qz;
-	float qxz = qx * qz;
-	float qxy = qx * qy;
-	float qyz = qy * qz;
-	float qwx = qw * qx;
-	float qwy = qw * qy;
-	float qwz = qw * qz;
-
-	mat3 rotation = mat3(1.0f);
-	rotation[0][0] = 1.0f - 2.0f * (qyy +  qzz);
-	rotation[0][1] = 2.0f * (qxy + qwz);
-	rotation[0][2] = 2.0f * (qxz - qwy);
-
-	rotation[1][0] = 2.0f * (qxy - qwz);
-	rotation[1][1] = 1.0f - 2.0f * (qxx +  qzz);
-	rotation[1][2] = 2.0f * (qyz + qwx);
-
-	rotation[2][0] = 2.0f * (qxz + qwy);
-	rotation[2][1] = 2.0f * (qyz - qwx);
-	rotation[2][2] = 1.0f - 2.0f * (qxx +  qyy);
-
-	return rotation;
 }
 
 vec3 getRayDir(vec2 pixelCoord, RenderTarget target){
@@ -295,13 +267,13 @@ void kernel_apply_transformation(
 		if(!isSelected) return;
 	}
 
-	vec3 dscale;
-	quat rotation;
-	vec3 translation;
-	vec3 skew;
-	vec4 perspective;
-	glm::decompose(transform, dscale, rotation, translation, skew, perspective);
-	rotation = glm::conjugate(rotation);
+	vec3 d_scale;
+	quat d_rotation;
+	vec3 d_translation;
+	vec3 d_skew;
+	vec4 d_perspective;
+	glm::decompose(transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+	d_rotation = glm::conjugate(d_rotation);
 
 	{ // TRANSFORM POSITION
 		vec3 pos = model.position[splatIndex];
@@ -317,7 +289,7 @@ void kernel_apply_transformation(
 			model.quaternion[splatIndex].w
 		);
 
-		q = rotation * q;
+		q = d_rotation * q;
 		float l = sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
 		l = 1.0f;
 
@@ -327,9 +299,22 @@ void kernel_apply_transformation(
 		model.quaternion[splatIndex].w = q.z / l;
 	}
 
+	if(model.shDegree > 0)
+	{ // SPHERICAL HARMONICS
+		mat3 rotation = glm::mat3_cast(d_rotation);
+		
+		int64_t offset = splatIndex * model.numSHCoefficients;
+		vec3* shs = (vec3*)(model.sphericalHarmonics + offset);
+		vec3 shs_transformed[15];
+		rotateSH(model.shDegree, shs, shs_transformed, rotation);
+
+		int numCoefficients = shDegreeToNumCoefficients(model.shDegree);
+		memcpy(shs, shs_transformed, (numCoefficients - 1) * sizeof(vec3));
+	}
+
 	{
 		vec3 scale = model.scale[splatIndex];
-		scale = scale * dscale;
+		scale = scale * d_scale;
 		model.scale[splatIndex] = scale;
 	}
 }
@@ -455,7 +440,7 @@ void kernel_rectselect(
 		if(ndc.y < -1.1f || ndc.y >  1.1f) return false;
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 
 		mat3 scale = mat3(1.0f);
 		scale[0][0] = model.scale[index].x;
@@ -582,18 +567,12 @@ void kernel_rectselect(
 	}
 }
 
-// Apply things like brushing and transformation in VR
 extern "C" __global__
 void kernel_select_vr(
 	CommonLaunchArgs args, 
 	GaussianData model,
 	bool isTriggerPressed,
 	mat4 controllerPose,
-	// VrController left,
-	// VrController right,
-	// vec3 right_delta,
-	// quat right_q_delta,
-	// mat4 transform_delta,
 	uint32_t* changedmask
 ){
 	auto grid = cg::this_grid();
@@ -614,13 +593,13 @@ void kernel_select_vr(
 	bool intersectionMode = BRUSH_INTERSECTION_CENTER;
 	intersectionMode = BRUSH_INTERSECTION_BORDER;
 
-	vec3 dscale;
-	quat rotation;
-	vec3 translation;
-	vec3 skew;
-	vec4 perspective;
-	glm::decompose(model.transform, dscale, rotation, translation, skew, perspective);
-	rotation = glm::conjugate(rotation);
+	vec3 d_scale;
+	quat d_rotation;
+	vec3 d_translation;
+	vec3 d_skew;
+	vec4 d_perspective;
+	glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+	d_rotation = glm::conjugate(d_rotation);
 
 	mat4 mTranslate = translate(vec3{0.0f, 0.1f, 0.0f});
 	mat4 mScale = scale(vec3{0.1f, 0.1f, 0.1f});
@@ -658,10 +637,21 @@ void kernel_select_vr(
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
-		vec3 scale = model.scale[index] * dscale;
+		vec3 scale = model.scale[index];
+
+		{ // apply the splat model's transformation
+			glm::quat q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+			q = d_rotation * q;
+
+			rotation = glm::mat3_cast(q);
+			rot4 = mat4(rotation);
+			rot4[3][3] = 1.0f;
+
+			scale = scale * d_scale;
+		}
 
 		vec3 dx = /** world * **/ rot4 * vec4{scale.x, 0.0f, 0.0f, 0.0f};
 		vec3 dy = /** world * **/ rot4 * vec4{0.0f, scale.y, 0.0f, 0.0f};
@@ -776,39 +766,70 @@ void kernel_select_sphere(
 
 	bool intersectionMode = BRUSH_INTERSECTION_CENTER;
 	intersectionMode = BRUSH_INTERSECTION_BORDER;
+	intersectionMode = BRUSH_INTERSECTION_CENTER;
 
-	if(intersectionMode = BRUSH_INTERSECTION_CENTER){
+	// spherePos = {0.0f, 0.0f, 0.0f};
+	// radius = 1.0f;
+
+	if(intersectionMode == BRUSH_INTERSECTION_CENTER){
 		vec3 pos = model.position[index];
 		pos = vec3(model.transform * vec4{pos.x, pos.y, pos.z, 1.0f});
 
 		float d = length(spherePos - pos);
 
-		radius = 0.5f;
+		uint32_t flags = model.flags[index];
 
 		if(d < radius){
-			model.flags[index] = model.flags[index] | FLAGS_HIGHLIGHTED;
+			model.flags[index] = flags | FLAGS_HIGHLIGHTED;
 
 			if(args.mouseEvents.isLeftDown){
-				bool alreadySelected = model.flags[index] & FLAGS_SELECTED;
+				bool alreadySelected = flags & FLAGS_SELECTED;
 
 				if(!alreadySelected){
-					model.flags[index] = model.flags[index] | FLAGS_SELECTED;
+					model.flags[index] = flags | FLAGS_SELECTED;
 
 					if(splatmask){
 						setBit(splatmask, index);
 					}
 				}
 			}
+		}else{
+			uint32_t newFlags = flags & ~FLAGS_HIGHLIGHTED;
+
+			if(flags != newFlags){
+				model.flags[index] = newFlags;
+			}
 		}
-	}else if(intersectionMode = BRUSH_INTERSECTION_BORDER){
+	}else if(intersectionMode == BRUSH_INTERSECTION_BORDER){
 		vec3 pos = model.position[index];
 		vec3 worldPos = vec3(model.transform * vec4(pos, 1.0f));
 
 		vec4 quat = model.quaternion[index];
-		mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+		mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
+		// mat4 rot4;
 		mat4 rot4 = mat4(rotation);
 		rot4[3][3] = 1.0f;
 		vec3 scale = model.scale[index];
+
+		{ // apply the splat model's transformation
+
+			vec3 d_scale;
+			glm::quat d_rotation;
+			vec3 d_translation;
+			vec3 d_skew;
+			vec4 d_perspective;
+			glm::decompose(model.transform, d_scale, d_rotation, d_translation, d_skew, d_perspective);
+			d_rotation = glm::conjugate(d_rotation);
+
+			// glm::quat q = glm::quat(quat.x, quat.y, quat.z, quat.w);
+			// q = d_rotation * q;
+
+			// rotation = glm::mat3_cast(q);
+			// rot4 = mat4(rotation);
+			// rot4[3][3] = 1.0f;
+
+			scale = scale * d_scale;
+		}
 
 		vec3 dx = /** world * **/ rot4 * vec4{scale.x, 0.0f, 0.0f, 0.0f};
 		vec3 dy = /** world * **/ rot4 * vec4{0.0f, scale.y, 0.0f, 0.0f};
@@ -913,14 +934,9 @@ void kernel_paint_sphere(
 
 	if(d < radius){
 
-		for(int i = 0; i < numTicks; i++){
-
+		if(args.uniforms.brushColorMode == BRUSHCOLORMODE_NORMAL){
 			float w_dist = clamp((radius - d) / radius, 0.0f, 1.0f);
-			// float w_strength = 0.01f;
-			// float w_strength = pow(args.brush.strength, 2.0f);
 			float w_opacity = paintColor.a;
-			// w_opacity = 0.5f;
-			// w_dist = 1.0f;
 			float w = w_dist * w_opacity;
 
 			float splatOpacity = stashedColors[index].normalized().a;
@@ -942,6 +958,18 @@ void kernel_paint_sphere(
 			}else{
 				model.color[index] = Color::fromNormalized(vec4{newCurrent, splatOpacity});
 			}
+		}else if(args.uniforms.brushColorMode == BRUSHCOLORMODE_HUE_SATURATION){
+			float splatOpacity = stashedColors[index].normalized().a;
+			vec3 csplat = model.color[index].normalized();
+
+			vec3 hsl_brush = rgbToHSL(paintColor.r, paintColor.g, paintColor.b);
+			vec3 hsl_splat = rgbToHSL(csplat.r, csplat.g, csplat.b);
+			
+			hsl_splat.r = hsl_brush.r;
+			hsl_splat.g = hsl_brush.g;
+			vec3 result = hslToRgb(hsl_splat.r, hsl_splat.g, hsl_splat.b);
+
+			model.color[index] = Color::fromNormalized(vec4{result, splatOpacity});
 		}
 
 	}
@@ -1376,7 +1404,7 @@ void kernel_brushselect(
 			vec4 viewPos = view * worldPos;
 			vec4 ndc = proj * viewPos;
 			vec4 quat = model.quaternion[splatIndex];
-			mat3 rotation = quatToMat3(quat.x, quat.y, quat.z, quat.w);
+			mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 			mat3 scale = mat3(1.0f);
 			scale[0][0] = model.scale[splatIndex].x;
 			scale[1][1] = model.scale[splatIndex].y;

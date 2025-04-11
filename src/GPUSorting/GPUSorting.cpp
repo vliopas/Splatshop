@@ -46,11 +46,6 @@ State getState(CUstream stream){
 		state.m_alt             = CURuntime::allocVirtual("m_alt");
 		state.m_altPayload      = CURuntime::allocVirtual("m_altPayload");
 
-		// TODO: we shouldn't need to preallocate that much. But somehow allocating on-demand often crashes. 
-		// state.m_passHistogram->commit(500'000'000);
-		// state.m_alt->commit(500'000'000);
-		// state.m_altPayload->commit(500'000'000);
-
 		streamState[stream] = state;
 	}
 
@@ -203,37 +198,16 @@ void sort_16bitkey_32bitvalue(uint32_t numElements, CUdeviceptr keys, CUdevicept
 
 
 	CUdeviceptr l_alt, l_alt_payload;
-	// if(alt_key != 0 && alt_payload != 0){
-	// 	// use provided intermediate buffers
-	// 	l_alt = alt_key;
-	// 	l_alt_payload = alt_payload;
-	// }else
 	{
 		// commit as much memory as needed for intermediate buffers
-
-		// state.m_alt->commit(16llu * (numElements + k_partitionSize));
-		// state.m_altPayload->commit(16llu * (numElements + k_partitionSize));
-
 		state.m_alt->commit(4 * numElements);
 		state.m_altPayload->commit(4 * numElements);
-
-		// state.m_alt->commit(800'000'000llu);
-		// state.m_altPayload->commit(800'000'000llu);
-
-		// state.m_passHistogram->commit(500'000'000);
-		// state.m_alt->commit(500'000'000);
-		// state.m_altPayload->commit(500'000'000);
 
 		l_alt = state.m_alt->cptr;
 		l_alt_payload = state.m_altPayload->cptr;
 	}
 
-	// For some reason we need the * 2 + 20'000'000, even though that wasnt the case in the original source
 	state.m_passHistogram->commit(threadblocks * k_radix * sizeof(uint32_t));
-	// state.m_passHistogram->commit(threadblocks * k_radix * sizeof(uint32_t) * 2 + 20'000'000);
-
-	// cuMemsetD8(m_globalHistogram, 0, k_radix * k_radixPasses * sizeof(uint32_t));
-	// cuMemsetD32Async(state.m_globalHistogram, 0, k_radix * k_radixPasses, stream);
 
 	CURuntime::check(cuMemsetD8Async(state.m_globalHistogram, 0, k_radix * k_radixPasses * sizeof(uint32_t), stream));
 

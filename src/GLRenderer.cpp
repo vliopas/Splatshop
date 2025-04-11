@@ -166,7 +166,11 @@ void GLRenderer::init(){
 	{
 		const GLFWvidmode * mode = glfwGetVideoMode(monitors[0]);
 
-		window = glfwCreateWindow(mode->width - 100, mode->height - 100, "Splat Editor", nullptr, nullptr);
+		// window = glfwCreateWindow(mode->width - 100, mode->height - 100, "Splat Editor", nullptr, nullptr);
+
+		int width = 1920;
+		int height = 1080;
+		window = glfwCreateWindow(width, height, "Splat Editor", nullptr, nullptr);
 
 		if (!window) {
 			glfwTerminate();
