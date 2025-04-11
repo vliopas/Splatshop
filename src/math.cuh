@@ -16,11 +16,11 @@ struct Plane{
 	float constant;
 };
 
-float distanceToPoint(vec3 point, Plane plane){
+inline float distanceToPoint(vec3 point, Plane plane){
 	return dot(plane.normal, point) + plane.constant;
 }
 
-float distanceToPlane(vec3 origin, vec3 direction, Plane plane){
+inline float distanceToPlane(vec3 origin, vec3 direction, Plane plane){
 
 	float denominator = dot(plane.normal, direction);
 
@@ -48,7 +48,7 @@ float distanceToPlane(vec3 origin, vec3 direction, Plane plane){
 	}
 }
 
-Plane createPlane(float x, float y, float z, float w){
+inline Plane createPlane(float x, float y, float z, float w){
 
 	float nLength = length(vec3{x, y, z});
 
@@ -171,7 +171,7 @@ struct Frustum{
 	}
 };
 
-bool intersectsFrustum(mat4 worldViewProj, Box3 box){
+inline bool intersectsFrustum(mat4 worldViewProj, Box3 box){
 
 	float* values = reinterpret_cast<float*>(&worldViewProj);
 
@@ -220,7 +220,7 @@ bool intersectsFrustum(mat4 worldViewProj, Box3 box){
 	return true;
 }
 
-bool isPointInBox(Box3 box, vec3 point){
+inline bool isPointInBox(Box3 box, vec3 point){
 
 	if(point.x < box.min.x) return false;
 	if(point.y < box.min.y) return false;
@@ -414,7 +414,7 @@ constexpr float kSqrt01_112 = 0.0944911182523068;
 constexpr float kSqrt03_112 = 0.16366341767699427;
 constexpr float kSqrt15_112 = 0.36596252735569995;
 
-static int shDegreeToNumCoefficients(int degree){
+inline static int shDegreeToNumCoefficients(int degree){
 
 	if(degree == 0) return 1;
 	if(degree == 1) return 4;
@@ -424,7 +424,7 @@ static int shDegreeToNumCoefficients(int degree){
 	return 0;
 }
 
-static int numCoefficientsToShDegree(int numCoefficients){
+inline static int numCoefficientsToShDegree(int numCoefficients){
 	if(numCoefficients == 1) return 0;
 	if(numCoefficients == 4) return 1;
 	if(numCoefficients == 9) return 2;
@@ -435,7 +435,7 @@ static int numCoefficientsToShDegree(int numCoefficients){
 
 // SH rotation code from: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/SHLib.cpp#L1090
 // LICENSE: https://github.com/andrewwillmott/sh-lib/blob/8821cba4acc2273ab20417388df16bd0012f0760/LICENSE.md (public domain)
-void rotateSH(int degree, vec3* shs, vec3* shs_transformed, mat3 rotation){
+inline void rotateSH(int degree, vec3* shs, vec3* shs_transformed, mat3 rotation){
 	
 	auto dp = [](int n, const vec3* a, const float* b){
 		vec3 sum = {0.0f, 0.0f, 0.0f};

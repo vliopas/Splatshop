@@ -561,7 +561,7 @@ void makeBrushesVR(ImguiPage* page){
 		editor->deleteSelection_undoable();
 	}
 	
-	ImGui::SliderFloat("Brush Size", &editor->settings.vr_brushSize, 0.01f, 0.3f);
+	// ImGui::SliderFloat("Brush Size", &editor->settings.vr_brushSize, 0.01f, 0.3f);
 
 	ImGui::PopFont();
 	ImGui::PopStyleColor();

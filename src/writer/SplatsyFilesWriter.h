@@ -20,6 +20,7 @@
 #include "./scene/SNSplats.h"
 #include "./scene/Scene.h"
 #include "AssetLibrary.h"
+#include "math.cuh"
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -266,11 +267,19 @@ namespace SplatsyFilesWriter{
 					// For rendering they are in [rgb][rgb]... order.
 
 					int64_t floatsPerChannel = shDegreeToNumCoefficients(data.shDegree) - 1;
+					int64_t numSHBytes = sizeof(float) * 3 * floatsPerChannel;
 
+					// rotate SHs
+					vec3* shs = (vec3*)(shs_processing->ptr + numSHBytes * i);
+					vec3 shs_transformed[15];
+					mat3 rotation = glm::mat3_cast(t_rotation);
+					rotateSH(data.shDegree, shs, shs_transformed, rotation);
+					memcpy(shs, shs_transformed, numSHBytes);
+
+					// store SHs in buffer
 					for(int64_t j = 0; j < floatsPerChannel; j++){
 
 						// "local" source and target index, relative to a single splat's SH data
-						int64_t numSHBytes = sizeof(float) * 3 * floatsPerChannel;
 						float a = shs_processing->get<float>(numSHBytes * i + 12 * j + 0);
 						float b = shs_processing->get<float>(numSHBytes * i + 12 * j + 4);
 						float c = shs_processing->get<float>(numSHBytes * i + 12 * j + 8);
@@ -279,7 +288,6 @@ namespace SplatsyFilesWriter{
 						buffer->set<float>(a, shsOffsetTarget + 4 * (0 * floatsPerChannel + j));
 						buffer->set<float>(b, shsOffsetTarget + 4 * (1 * floatsPerChannel + j));
 						buffer->set<float>(c, shsOffsetTarget + 4 * (2 * floatsPerChannel + j));
-
 					}
 				}
 
