@@ -50,9 +50,9 @@ void initScene() {
 	// SplatsyFilesLoader::load("./splatmodels_lantern/scene.json", editor->scene, *Runtime::controls);
 
 	// string path = "./gaussians_w_pca.ply";
-	// string path = "./splatmodels/scene.json";
+	string path = "./splatmodels/scene.json";
 	// string path = "E:/resources/gaussian_splats/garden.ply";
-	string path = "E:/resources/splats/gardentable.ply";
+	// string path = "E:/resources/splats/gardentable.ply";
 	// string path = "./splatmodels_3dgs_and_perspcorrect/scene.json";
 	// string path = "/home/hahlbohm/code/nerficg_public/nerficg/output/HTGS/htgs_garden_2025-03-06-20-25-48/gaussians.ply";
 	// string path = "F:/SplatEditor/city_gaussians_mc_aerial_c36.ply";
