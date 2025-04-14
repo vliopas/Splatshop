@@ -182,8 +182,7 @@ void drawsplats_perspectiveCorrect_concurrent(
 			numPotentiallyVisibleSplats += node->dmng.data.count;
 		});
 		target.virt_stagedata->commit(sizeof(StageData_perspectivecorrect) * numPotentiallyVisibleSplats);
-		target.virt_depth->commit(sizeof(float) * numPotentiallyVisibleSplats); // not needed
-		target.virt_bounds->commit(sizeof(glm::i16vec4) * numPotentiallyVisibleSplats); // could be i16vec4
+		target.virt_bounds->commit(sizeof(glm::i16vec4) * numPotentiallyVisibleSplats);
 		target.virt_ordering_splatdepth->commit(sizeof(uint32_t) * numPotentiallyVisibleSplats);
 		target.virt_numTilefragments_splatwise->commit(sizeof(uint32_t) * numPotentiallyVisibleSplats);
 
@@ -211,7 +210,6 @@ void drawsplats_perspectiveCorrect_concurrent(
 				&target.cptr_numVisibleSplats,
 				&target.cptr_numFragments, 
 				&target.virt_numTilefragments_splatwise->cptr,
-				&target.virt_depth->cptr,
 				&target.virt_bounds->cptr,
 				&target.virt_stagedata->cptr,
 				&target.virt_ordering_splatdepth->cptr,
@@ -257,66 +255,21 @@ void drawsplats_perspectiveCorrect_concurrent(
 		
 	}
 
-	for(auto target : targets){
-
-		target.virt_tileIDs->commit(4 * target.numFragments);
-		target.virt_numTilefragments_splatwise_ordered->commit(4 * target.numFragments);
-		target.virt_indices->commit(4 * target.numFragments);
-
-		// Unfortunately we can't sort simultaneously, since both use the same alternative sort buffers
-		cuCtxSynchronize();
-
-		// sort visible splats by depth (or rather, compute the order without applying it).
-		// We have to provide radix-sort with intermediate memory for sorting, which must be separate for each concurrent target.
-		GPUSorting::sort_32bit_keyvalue(target.numVisibleSplats, target.virt_depth->cptr, target.virt_ordering_splatdepth->cptr, 0, 0,target.mainstream);
-
-		// Apply the ordering. Necessary because we don't have 64 bit sorting and do it in a 32bit sort, followed by another 16 bit sort.
-		// The follow-up 16 bit sort needs its keys to be sorted by the preceeding 32 bit sort.
-		void* argsApply[] = {
-			&target.virt_numTilefragments_splatwise->cptr, 
-			&target.virt_numTilefragments_splatwise_ordered->cptr, 
-			&target.virt_ordering_splatdepth->cptr, 
-			&target.numVisibleSplats
-		};
-		editor->prog_gaussians_rendering->launch("kernel_applyOrdering_u32", argsApply, target.numVisibleSplats, target.mainstream);
-
-		// Compute prefix sum of tile fragment counters.
-		GPUPrefixSumsCS::dispatch(target.numVisibleSplats, target.virt_numTilefragments_splatwise_ordered->cptr, target.mainstream);
-	}
-
-	// for(auto target : targets){
-	// 	// The prefix sum is stored in-place in cptr_numTilefragments_ordered
-	// 	CUdeviceptr cptr_prefixsum = target.virt_numTilefragments_splatwise_ordered->cptr;
-
-	// 	// now create the tile fragment (StageData) array
-	// 	void* argsCreatefragmentArray[] = {
-	// 		// input
-	// 		&editor->launchArgs, &target,
-	// 		&target.virt_ordering_splatdepth->cptr, &target.numVisibleSplats, &target.virt_stagedata->cptr, 
-	// 		&cptr_prefixsum,& target.cptr_numFragments,
-	// 		// output
-	// 		&target.virt_tileIDs->cptr, &target.virt_indices->cptr,
-	// 	};
-
-	// 	// Lot's of syncs - without them the 16bit sorting crashed upon loadig large splat models
-	// 	// cuCtxSynchronize();
-	// 	editor->prog_gaussians_rendering->launch("kernel_createTilefragmentArray", argsCreatefragmentArray, target.numVisibleSplats, target.mainstream);
-	// 	// cuCtxSynchronize();
-	// 	GPUSorting::sort_16bitkey_32bitvalue(target.numFragments, target.virt_tileIDs->cptr, target.virt_indices->cptr, target.mainstream);
-	// 	// cuCtxSynchronize();
-	// }
-
 	// Create tile fragment arrays concurrently
 	for(auto target : targets){
-		// The prefix sum is stored in-place in cptr_numTilefragments_ordered
-		CUdeviceptr cptr_prefixsum = target.virt_numTilefragments_splatwise_ordered->cptr;
+
+		// Compute prefix sum of tile fragment counters.
+		GPUPrefixSumsCS::dispatch(target.numVisibleSplats, target.virt_numTilefragments_splatwise->cptr, target.mainstream);
+
+		target.virt_tileIDs->commit(4 * target.numFragments);
+		target.virt_indices->commit(4 * target.numFragments);
 
 		// now create the tile fragment (StageData) array
 		void* argsCreatefragmentArray[] = {
 			// input
 			&editor->launchArgs, &target,
-			&target.virt_ordering_splatdepth->cptr, &target.numVisibleSplats, &target.virt_bounds->cptr,
-			&cptr_prefixsum,& target.cptr_numFragments,
+			&target.numVisibleSplats, &target.virt_bounds->cptr,
+			&target.virt_numTilefragments_splatwise->cptr,& target.cptr_numFragments,
 			// output
 			&target.virt_tileIDs->cptr, &target.virt_indices->cptr,
 		};
@@ -360,7 +313,6 @@ void drawsplats_perspectiveCorrect_concurrent(
 			};
 
 			editor->prog_gaussians_rendering->launch("kernel_render_gaussians_perspectivecorrect", args_rendering, {.gridsize = numTiles, .blocksize = blockSize, .stream = target.sidestream});
-
 
 		}
 	}
