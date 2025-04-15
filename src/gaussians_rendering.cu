@@ -800,7 +800,7 @@ void kernel_stageSplats(
 }
 
 inline constexpr int K = 16;
-#define USE_FAST_CONFIG
+// #define USE_FAST_CONFIG
 #ifdef USE_FAST_CONFIG
 // fast config
 inline constexpr float MIN_ALPHA_THRESHOLD_RCP = 20.0f;
@@ -813,9 +813,10 @@ inline constexpr float MAX_CUTTOFF_SQ = 11.0825270903f; // logf(MIN_ALPHA_THRESH
 inline constexpr float MIN_ALPHA_THRESHOLD = 1.0f / MIN_ALPHA_THRESHOLD_RCP;
 inline constexpr float MIN_ALPHA_THRESHOLD_CORE = (MIN_ALPHA_THRESHOLD_RCP >= 20.0f) ? 1.0f / 20.0f : MIN_ALPHA_THRESHOLD;
 inline constexpr float MAX_FRAGMENT_ALPHA = 1.0f; // 3dgs uses 0.99f
-inline constexpr float TRANSMITTANCE_THRESOLD = 1e-4f;
+inline constexpr float TRANSMITTANCE_THRESHOLD = 1e-4f;
 
 extern "C" __global__
+// void __launch_bounds__(256, 6) kernel_stageSplats_perspectivecorrect(
 void kernel_stageSplats_perspectivecorrect(
 	CommonLaunchArgs args,
 	RenderTarget target,
@@ -825,7 +826,6 @@ void kernel_stageSplats_perspectivecorrect(
 	uint32_t* visibleSplatCounter,
 	uint32_t* numTilefragments,
 	uint32_t* numTilefragments_splatwise,
-	float* staging_depth,
 	glm::i16vec4* staging_bounds,
 	StageData_perspectivecorrect* staging_data,
 	uint32_t* ordering
@@ -849,6 +849,38 @@ void kernel_stageSplats_perspectivecorrect(
 
 	vec4 color = model.color[splatIndex].normalized();
 	if (color.a < MIN_ALPHA_THRESHOLD) return;
+
+	// WIP: SHs not yet robust under model and splat transformations
+	constexpr int updateOverXFrames = 10;
+	if (splatIndex % updateOverXFrames == args.uniforms.frameCount % updateOverXFrames)
+	if (model.shDegree > 0) {
+		int64_t offset = splatIndex * model.numSHCoefficients;
+		vec3* shs = (vec3*)(model.sphericalHarmonics + offset);
+
+		vec3 camPos_model = -worldView[3] * mat3(worldView); // same as inverse(worldView)[3] -> differences are smaller than 0.000001f
+		vec3 viewdir = normalize(vec3(splatPos) - camPos_model);
+		vec4 harmonics = vec4(getHarmonics(model.shDegree, model.numSHCoefficients, viewdir, shs), 0.0f);
+		
+		vec4 colBaked = color + harmonics;
+		colBaked = glm::max(colBaked, 0.0f);
+		colBaked.a = color.a;
+
+		uint32_t C = 
+			(uint32_t(clamp(256.0f * colBaked.r, 0.0f, 255.0f)) <<  0) |
+			(uint32_t(clamp(256.0f * colBaked.g, 0.0f, 255.0f)) <<  8) |
+			(uint32_t(clamp(256.0f * colBaked.b, 0.0f, 255.0f)) << 16) |
+			(uint32_t(clamp(256.0f * colBaked.a, 0.0f, 255.0f)) << 24);
+		model.color_resolved[splatIndex] = C;
+	}
+
+	if (model.shDegree > 0) {
+		uint32_t C = model.color_resolved[splatIndex];
+		color.r = float((C >>  0) & 0xff) / 256.0f;
+		color.g = float((C >>  8) & 0xff) / 256.0f;
+		color.b = float((C >> 16) & 0xff) / 256.0f;
+		color.a = float((C >> 24) & 0xff) / 256.0f;
+	}
+
 	vec4 quat = model.quaternion[splatIndex];
 	mat3 rotation = glm::mat3_cast(glm::quat(quat.x, quat.y, quat.z, quat.w));
 
@@ -959,7 +991,6 @@ void kernel_stageSplats_perspectivecorrect(
 	stuff.color = to32BitColor(color);
 	stuff.flags = flags;
 
-	staging_depth[visibleSplatID] = z_view;
 	staging_bounds[visibleSplatID] = glm::i16vec4(screen_bounds);
 	staging_data[visibleSplatID] = stuff;
 
@@ -1071,11 +1102,11 @@ void kernel_createTilefragmentArray(
 }
 
 extern "C" __global__
+// void __launch_bounds__(256, 6) kernel_createTilefragmentArray_perspectivecorrect(
 void kernel_createTilefragmentArray_perspectivecorrect(
 	// input
 	CommonLaunchArgs args,
 	RenderTarget target,
-	uint32_t* ordering, 
 	uint32_t numStagedSplats,
 	glm::i16vec4* staging_bounds,
 	uint32_t* prefixsum,
@@ -1084,33 +1115,94 @@ void kernel_createTilefragmentArray_perspectivecorrect(
 	uint32_t* tileIDs,
 	uint32_t* splatIDs
 ){
+	constexpr uint32_t block_size = 256u;
+	constexpr uint32_t n_sequential_threshold = 2u;
+
 	// index of unsorted, staged splats
-	uint32_t index = cg::this_grid().thread_rank();
+	uint32_t primitive_idx = cg::this_grid().thread_rank();
+	bool active = true;
+	if (primitive_idx >= numStagedSplats) {
+		active = false;
+		primitive_idx = numStagedSplats - 1;
+	}
 
-	if(index >= numStagedSplats) return;
+	// load bounds of splats
+	glm::i16vec4 screen_bounds_init = staging_bounds[primitive_idx];
+	uint32_t tile_count_init = (screen_bounds_init.z - screen_bounds_init.x) * (screen_bounds_init.w - screen_bounds_init.y);
 
-	// index of depth-sorted splats
-	uint32_t order = ordering[index];
+	if (tile_count_init == 0) active = false;
+	if (__ballot_sync(0xffffffffu, active) == 0) return;
 
-	// load bounds of splats in depth-sorted order
-	glm::i16vec4 bounds = staging_bounds[order];
-
-	uint32_t fragmentOffset = prefixsum[index];
+	uint32_t current_write_offset = prefixsum[primitive_idx];
+	uint32_t screen_bounds_width_init = screen_bounds_init.z - screen_bounds_init.x;
 
 	uint32_t tiles_x = (target.width + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
 
-	for (uint32_t tile_x = bounds.x; tile_x < bounds.z; tile_x++)
-	for (uint32_t tile_y = bounds.y; tile_y < bounds.w; tile_y++)
-	{
-		uint32_t tileID = tile_y * tiles_x + tile_x;
+	if (active) {
+		for (uint32_t instance_idx = 0; instance_idx < tile_count_init && instance_idx < n_sequential_threshold; instance_idx++) {
+			uint32_t tile_y = screen_bounds_init.y + (instance_idx / screen_bounds_width_init);
+			uint32_t tile_x = screen_bounds_init.x + (instance_idx % screen_bounds_width_init);
+			uint32_t tileID = tile_y * tiles_x + tile_x;
 
-		tileIDs[fragmentOffset] = tileID;
-		splatIDs[fragmentOffset] = order;
+			tileIDs[current_write_offset] = tileID;
+			splatIDs[current_write_offset] = primitive_idx;
 
-		fragmentOffset++;
+			current_write_offset++;
+		}
 	}
-}
 
+	uint32_t thread_rank = cg::this_thread_block().thread_rank();
+	uint32_t lane_idx = thread_rank % 32u;
+	uint32_t warp_idx = thread_rank / 32u;
+	uint32_t lane_mask_allprev_excl = 0xffffffffu >> (32u - lane_idx);
+
+	const int compute_cooperatively = active && tile_count_init > n_sequential_threshold;
+	const uint32_t remaining_threads = __ballot_sync(0xffffffffu, compute_cooperatively);
+	if (remaining_threads == 0) return;
+
+	__shared__ glm::i16vec4 collected_screen_bounds[block_size];
+	collected_screen_bounds[thread_rank] = screen_bounds_init;
+
+	uint32_t n_remaining_threads = __popc(remaining_threads);
+	for (int n = 0; n < n_remaining_threads && n < 32; n++) {
+		int i = __fns(remaining_threads, 0, n + 1); // find lane index of next remaining thread
+
+		uint32_t primitive_idx_coop = __shfl_sync(0xffffffffu, primitive_idx, i);
+		uint32_t current_write_offset_coop = __shfl_sync(0xffffffffu, current_write_offset, i);
+
+		glm::i16vec4 screen_bounds = collected_screen_bounds[warp_idx * 32 + i];
+
+		const uint32_t screen_bounds_width = screen_bounds.z - screen_bounds.x;
+		const uint32_t tile_count = screen_bounds_width * (screen_bounds.w - screen_bounds.y);
+		const uint32_t remaining_tile_count = tile_count - n_sequential_threshold;
+
+		const int n_iterations = (remaining_tile_count + 31) / 32;
+		for (int it = 0; it < n_iterations; it++) {
+			const int instance_idx = it * 32 + lane_idx + n_sequential_threshold;
+			const int active_curr_it = instance_idx < tile_count;
+
+			uint32_t tile_y = screen_bounds.y + (instance_idx / screen_bounds_width);
+			uint32_t tile_x = screen_bounds.x + (instance_idx % screen_bounds_width);
+
+			const uint32_t write = active_curr_it && true;
+
+			const uint32_t write_ballot = __ballot_sync(0xffffffffu, write);
+			const uint32_t n_writes = __popc(write_ballot);
+
+			const uint32_t write_offset_it = __popc(write_ballot & lane_mask_allprev_excl);
+			const uint32_t write_offset = current_write_offset_coop + write_offset_it;
+
+			if (write) {
+				uint32_t tileID = tile_y * tiles_x + tile_x;
+
+				tileIDs[write_offset] = tileID;
+				splatIDs[write_offset] = primitive_idx_coop;
+			}
+			current_write_offset_coop += n_writes;
+		}
+	}
+
+}
 
 extern "C" __global__
 void kernel_prefilter_tiled_stagedata(
@@ -1476,6 +1568,22 @@ __device__ void swap(
     b = temp;
 }
 
+struct FragmentInfo {
+    float depth;
+    uint32_t color;
+    __device__ FragmentInfo(): depth(__FLT_MAX__), color(0) {}
+    __device__ FragmentInfo(const float d, const vec4 c) : depth(d), color(to32BitColor(c)) {}
+	__device__ vec4 get_color() {
+		return vec4{
+			(color >>  0) & 0xff,
+			(color >>  8) & 0xff,
+			(color >> 16) & 0xff,
+			(color >> 24) & 0xff,
+		} / 255.0f;
+	}
+};
+__device__ __forceinline__ bool operator<(FragmentInfo& a, FragmentInfo& b) { return a.depth < b.depth; }
+
 extern "C" __global__
 void kernel_render_gaussians_perspectivecorrect(
 	CommonLaunchArgs args, RenderTarget target,
@@ -1485,10 +1593,6 @@ void kernel_render_gaussians_perspectivecorrect(
 	auto block    = cg::this_thread_block();
 	constexpr int BLOCK_SIZE = TILE_SIZE_PERSPCORRECT * TILE_SIZE_PERSPCORRECT;
 
-	dim3 group_index = block.group_index();
-	dim3 thread_index = block.thread_index();
-	uint32_t thread_rank = block.thread_rank();
-	uint2 pixel_coords = make_uint2(group_index.x * TILE_SIZE_PERSPCORRECT + thread_index.x, group_index.y * TILE_SIZE_PERSPCORRECT + thread_index.y);
 	int width     = target.width;
 	int height    = target.height;
 	int tiles_x   = (width + TILE_SIZE_PERSPCORRECT - 1) / TILE_SIZE_PERSPCORRECT;
@@ -1516,56 +1620,25 @@ void kernel_render_gaussians_perspectivecorrect(
 
 	bool inside = pixel_x < width && pixel_y < height;
 	// setup shared memory
-	__shared__ vec4 collected_VPMT1[BLOCK_SIZE], collected_VPMT2[BLOCK_SIZE], collected_VPMT4[BLOCK_SIZE], collected_MT3[BLOCK_SIZE];
-	__shared__ vec3 collected_rgb[BLOCK_SIZE];
-	__shared__ float collected_opacity[BLOCK_SIZE];
-	__shared__ uint32_t collected_flags[BLOCK_SIZE];
+	__shared__ StageData_perspectivecorrect collected_stageData[BLOCK_SIZE];
 	// initialize local storage
+	float min_valid_core_depth = __FLT_MAX__;
 	float transmittance_tail = 1.0f;
 	vec4 rgba_premultiplied_tail = vec4(0.0f);
-	__half2 rgbas_premultiplied_core_rg[K];
-	__half2 rgbas_premultiplied_core_ba[K];
-	float depths_core[K];
-	bool validForDepth[K];
-	#pragma unroll
-	for (int i = 0; i < K; ++i) {
-		rgbas_premultiplied_core_rg[i]= {0};
-		rgbas_premultiplied_core_ba[i]= {0};
-		depths_core[i] = __FLT_MAX__;
-		validForDepth[i] = true;
-	}
+	FragmentInfo core_fragments[K];
 	float oldDepth = inside ? __int_as_float(target.framebuffer[pixelID] >> 32) : Infinity;
 	// collaborative loading and processing
-	uint2 tile_range = make_uint2(tile.firstIndex, tile.lastIndex + 1); // TODO: lastIndex or lastIndex + 1?
-	for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_points_remaining > 0; n_points_remaining -= BLOCK_SIZE, current_fetch_idx += BLOCK_SIZE) {
+	uint2 tile_range = make_uint2(tile.firstIndex, tile.lastIndex + 1);
+	for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + tilePixelIndex; n_points_remaining > 0; n_points_remaining -= BLOCK_SIZE, current_fetch_idx += BLOCK_SIZE) {
 		block.sync();
-		if (current_fetch_idx < tile_range.y) {
-			int splatIndex = indices[current_fetch_idx];
-			StageData_perspectivecorrect stageData = stagedatas[splatIndex];
-			uint32_t C = stageData.color;
-			vec4 rgba = vec4{
-				(C >>  0) & 0xff,
-				(C >>  8) & 0xff,
-				(C >> 16) & 0xff,
-				(C >> 24) & 0xff,
-			 } / 255.0f;
-			collected_VPMT1[thread_rank] = stageData.VPMT1;
-			collected_VPMT2[thread_rank] = stageData.VPMT2;
-			collected_VPMT4[thread_rank] = stageData.VPMT4;
-			collected_MT3[thread_rank] = stageData.MT3;
-			collected_rgb[thread_rank] = vec3(rgba);
-			collected_opacity[thread_rank] = rgba.w;
-			collected_flags[thread_rank] = stageData.flags;
-		}
+		if (current_fetch_idx < tile_range.y) collected_stageData[tilePixelIndex] = stagedatas[indices[current_fetch_idx]];
 		block.sync();
 		if (inside) {
 			int current_batch_size = min(BLOCK_SIZE, n_points_remaining);
 			for (int j = 0; j < current_batch_size; ++j) {
-				vec4 VPMT1 = collected_VPMT1[j];
-				vec4 VPMT2 = collected_VPMT2[j];
-				vec4 VPMT4 = collected_VPMT4[j];
-				vec4 plane_x_diag = VPMT1 - VPMT4 * fpixel_x;
-				vec4 plane_y_diag = VPMT2 - VPMT4 * fpixel_y;
+				StageData_perspectivecorrect stageData = collected_stageData[j];
+				vec4 plane_x_diag = stageData.VPMT1 - stageData.VPMT4 * fpixel_x;
+				vec4 plane_y_diag = stageData.VPMT2 - stageData.VPMT4 * fpixel_y;
 				vec3 plane_x_diag_normal = vec3(plane_x_diag);
 				vec3 plane_y_diag_normal = vec3(plane_y_diag);
 				vec3 m = plane_x_diag.w * plane_y_diag_normal - plane_x_diag_normal * plane_y_diag.w;
@@ -1575,57 +1648,54 @@ void kernel_render_gaussians_perspectivecorrect(
 				if (numerator_rho2 > MAX_CUTTOFF_SQ * denominator) continue; // considering opacity requires log/sqrt -> slower
 				float denominator_rcp = 1.0f / denominator;
 				float G = expf(-0.5f * numerator_rho2 * denominator_rcp);
-				float opacity = collected_opacity[j];
-				float alpha = fminf(opacity * G, MAX_FRAGMENT_ALPHA);
+				vec4 rgba = vec4{
+					(stageData.color >>  0) & 0xff,
+					(stageData.color >>  8) & 0xff,
+					(stageData.color >> 16) & 0xff,
+					(stageData.color >> 24) & 0xff,
+				} / 255.0f;
+				float alpha = fminf(rgba.w * G, MAX_FRAGMENT_ALPHA);
 				if (alpha < MIN_ALPHA_THRESHOLD) continue;
-				if (args.uniforms.showRing && alpha < 0.1f){
-					alpha += 0.9f;
-				}
+				if (args.uniforms.showRing && alpha < 0.1f) alpha += 0.9f;
 
 				vec3 eval_point_diag = cross(d, m) * denominator_rcp;
-				vec4 MT3 = collected_MT3[j];
-				float depth = dot(vec3(MT3), eval_point_diag) + MT3.w;
+				float depth = dot(vec3(stageData.MT3), eval_point_diag) + stageData.MT3.w;
 				if (depth >= oldDepth) continue;
 
-				bool depth_valid = (collected_flags[j] & FLAGS_DISABLE_DEPTHWRITE) == 0;
-				
-				vec3 rgb = collected_rgb[j];
-				__half2 rgba_premultiplied_rg = __float22half2_rn(make_float2(rgb.x * alpha, rgb.y * alpha));
-				__half2 rgba_premultiplied_ba = __float22half2_rn(make_float2(rgb.z * alpha, alpha));
-				if (depth < depths_core[K - 1] && alpha >= MIN_ALPHA_THRESHOLD_CORE) {
+				bool new_depth_valid = (stageData.flags & FLAGS_DISABLE_DEPTHWRITE) == 0;
+				if (new_depth_valid && depth < min_valid_core_depth && alpha >= MIN_ALPHA_THRESHOLD_CORE) min_valid_core_depth = depth;
+
+				vec4 rgba_premultiplied = vec4{
+					rgba.r * alpha,
+					rgba.g * alpha,
+					rgba.b * alpha,
+					alpha
+				};
+				if (depth < core_fragments[K - 1].depth && alpha >= MIN_ALPHA_THRESHOLD_CORE) {
+					FragmentInfo core_fragment = FragmentInfo(depth, rgba_premultiplied);
 					#pragma unroll
-					for (int core_idx = 0; core_idx < K; ++core_idx) {
-						if (depth < depths_core[core_idx]) {
-							swap(depth, depths_core[core_idx]);
-							swap(rgba_premultiplied_rg, rgbas_premultiplied_core_rg[core_idx]);
-							swap(rgba_premultiplied_ba, rgbas_premultiplied_core_ba[core_idx]);
-							swap(depth_valid, validForDepth[core_idx]);
-						}
-					}
+					for (int core_idx = 0; core_idx < K; ++core_idx)
+						if (core_fragment < core_fragments[core_idx] && core_fragment.depth < __FLT_MAX__)
+							swap(core_fragment, core_fragments[core_idx]);
+					rgba_premultiplied = core_fragment.get_color();
 				}
-				rgba_premultiplied_tail += vec4(__half2float(rgba_premultiplied_rg.x), __half2float(rgba_premultiplied_rg.y), __half2float(rgba_premultiplied_ba.x), __half2float(rgba_premultiplied_ba.y));
-				transmittance_tail *= 1.0f - __half2float(rgba_premultiplied_ba.y);
+				rgba_premultiplied_tail += rgba_premultiplied;
+				transmittance_tail *= 1.0f - rgba_premultiplied.a;
 			}
 		}
 	}
 	if (inside) {
 		// blend core
 		vec3 rgb_pixel = vec3(0.0f);
-		float depth_pixel = __FLT_MAX__;
+		float depth_pixel = min_valid_core_depth;
 		float transmittance_core = 1.0f;
 		bool done = false;
 		#pragma unroll
 		for (int core_idx = 0; core_idx < K && !done; ++core_idx) {
-			float2 rgba_premultiplied_rg = __half22float2(rgbas_premultiplied_core_rg[core_idx]);
-			float2 rgba_premultiplied_ba = __half22float2(rgbas_premultiplied_core_ba[core_idx]);
-			vec3 rgb_premultiplied = vec3(rgba_premultiplied_rg.x, rgba_premultiplied_rg.y, rgba_premultiplied_ba.x);
-
-			float depth = depths_core[core_idx];
-			depth_pixel = (transmittance_core > 0.5f && depth < __FLT_MAX__ && validForDepth[core_idx]) ? depth : depth_pixel;
-
-			rgb_pixel += transmittance_core * rgb_premultiplied;
-			transmittance_core *= 1.0f - rgba_premultiplied_ba.y;
-			if (transmittance_core < TRANSMITTANCE_THRESOLD) done = true;
+			vec4 rgba_premultiplied = core_fragments[core_idx].get_color();
+			rgb_pixel += transmittance_core * vec3(rgba_premultiplied.x, rgba_premultiplied.y, rgba_premultiplied.z);
+			transmittance_core *= 1.0f - rgba_premultiplied.w;
+			if (transmittance_core < TRANSMITTANCE_THRESHOLD) done = true;
 		}
 
 		float transmittance_pixel = transmittance_core;
