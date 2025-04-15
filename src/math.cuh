@@ -295,8 +295,10 @@ inline bool intersection_circle_splat(
 ){
 	vec2 pFrag = circlePos - splatPos;
 
-	vec2 a_large = a * (length(a) + radius) / length(a);
-	vec2 b_large = b * (length(b) + radius) / length(b);
+	float la = length(a);
+	float lb = length(b);
+	vec2 a_large = a * (la + radius) / la;
+	vec2 b_large = b * (lb + radius) / lb;
 
 	float sA = dot(a_large, pFrag) / dot(a_large, a_large);
 	float sB = dot(b_large, pFrag) / dot(b_large, b_large);

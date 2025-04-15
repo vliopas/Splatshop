@@ -50,6 +50,7 @@ void initScene() {
 	// SplatsyFilesLoader::load("./splatmodels_lantern/scene.json", editor->scene, *Runtime::controls);
 
 	// string path = "./gaussians_w_pca.ply";
+	// string path = "./splatmodels_benchmark_garden_far/scene.json";
 	string path = "./splatmodels/scene.json";
 	// string path = "E:/resources/gaussian_splats/garden.ply";
 	// string path = "E:/resources/splats/gardentable.ply";
@@ -67,10 +68,10 @@ void initScene() {
 			editor->scene.world->children.push_back(node);
 		}
 
-		Runtime::controls->yaw    = 3.155;
-		Runtime::controls->pitch  = -0.220;
-		Runtime::controls->radius = 3.877;
-		Runtime::controls->target = { 0.353, 0.518, 1.240, };
+		// Runtime::controls->yaw    = 3.155;
+		// Runtime::controls->pitch  = -0.220;
+		// Runtime::controls->radius = 3.877;
+		// Runtime::controls->target = { 0.353, 0.518, 1.240, };
 	}else{
 		println("Could not find file {}", path);
 	}

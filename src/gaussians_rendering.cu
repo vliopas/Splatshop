@@ -260,6 +260,8 @@ vec3 getHarmonics(
 template <typename Function>
 void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
 
+	// forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+
 	// use approximate tile-splat intersection
 	float quadHalfWidth  = sqrt(basisVector1.x * basisVector1.x + basisVector2.x * basisVector2.x);
 	float quadHalfHeight = sqrt(basisVector1.y * basisVector1.y + basisVector2.y * basisVector2.y);
@@ -308,12 +310,14 @@ void forEachTouchedTile(vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, R
 template <typename Function>
 void forEachTouchedTile(int mode, vec2 splatCoord, vec2 basisVector1, vec2 basisVector2, RenderTarget target, Function f){
 
+	// if(cg::this_grid().thread_rank() == 0) printf("mode: %d \n", mode);
+
 	if(mode == INTERSECTION_APPROXIMATE){
 		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
 	}else if(mode == INTERSECTION_3DGS){
-		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+		forEachTouchedTile_3dgs(splatCoord, basisVector1, basisVector2, target, f);
 	}else if(mode == INTERSECTION_TIGHTBB){
-		forEachTouchedTile_approx(splatCoord, basisVector1, basisVector2, target, f);
+		forEachTouchedTile_tightBB(splatCoord, basisVector1, basisVector2, target, f);
 	}
 
 }
@@ -498,8 +502,9 @@ void kernel_stageSplats(
 
 	// WIP: SHs not yet robust under model and splat transformations
 	constexpr int updateOverXFrames = 10;
-	if(splatIndex % updateOverXFrames == args.uniforms.frameCount % updateOverXFrames)
 	// if(false)
+	if(splatIndex % updateOverXFrames == args.uniforms.frameCount % updateOverXFrames)
+	if(!target.isRight)
 	if(model.shDegree > 0 ){
 		// if(splatIndex == 0) printf("model.numSHCoefficients: %d \n", model.numSHCoefficients);
 		// int64_t offset = splatIndex * 45;
@@ -623,8 +628,8 @@ void kernel_stageSplats(
 	mat3 T = W * J;
 
 	mat3 cov2Dm = transpose(T) * cov3D * T;
-	cov2Dm[0][0] += 0.2f;
-	cov2Dm[1][1] += 0.2f;
+	cov2Dm[0][0] += 0.3f;
+	cov2Dm[1][1] += 0.3f;
 
 	vec3 cov2Dv = vec3(cov2Dm[0][0], cov2Dm[0][1], cov2Dm[1][1]);
 
@@ -655,7 +660,7 @@ void kernel_stageSplats(
 
 		// cull small splats with little opacity?
 	}
-	if(color.a < 10.0f / 256.0f) return;
+	// if(color.a < 10.0f / 256.0f) return;
 
 	if(args.uniforms.makePoints){
 		if(eigenValue1 < 0.105f) return;
@@ -784,7 +789,9 @@ void kernel_stageSplats(
 	// Count tile fragments that each splat produces
 	uint32_t tileFrags = 0;
 
-	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+	
+	// forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+	forEachTouchedTile(args.uniforms.intersectionMode, pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
 		tileFrags++;
 	});
 
@@ -1051,7 +1058,8 @@ void kernel_createTilefragmentArray(
 
 	uint32_t fragmentOffset = prefixsum[index];
 
-	forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+	// forEachTouchedTile(pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
+	forEachTouchedTile(args.uniforms.intersectionMode, pixelCoord, basisVector1, basisVector2, target, [&](uint32_t tile_x, uint32_t tile_y){
 		uint32_t tileID = tile_x + tile_y * tiles_x;
 
 		tileIDs[fragmentOffset] = tileID;

@@ -1435,6 +1435,7 @@ Uniforms SplatEditor::getUniforms(){
 	uniforms.splatSize                = settings.splatSize;
 	uniforms.cullSmallSplats          = settings.cullSmallSplats;
 	uniforms.brushColorMode           = settings.brushColorMode;
+	uniforms.intersectionMode         = settings.intersectionMode;
 
 	uniforms.inset.show               = settings.showInset;
 	uniforms.inset.start              = {16 * 60, 16 * 50};

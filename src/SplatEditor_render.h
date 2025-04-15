@@ -122,6 +122,8 @@ void SplatEditor::render(){
 			target_left.view = mat4(viewLeft.view); 
 			target_left.proj = viewLeft.proj;
 			target_left.VP = viewLeft.VP;
+			target_left.isLeft = true;
+			target_left.isRight = false;
 
 			RenderTarget target_right;
 			target_right.width = width;
@@ -131,6 +133,8 @@ void SplatEditor::render(){
 			target_right.view = mat4(viewRight.view); 
 			target_right.proj = viewRight.proj;
 			target_right.VP = viewRight.VP;
+			target_right.isLeft = false;
+			target_right.isRight = true;
 
 			vector<RenderTarget> targets = { target_left, target_right };
 			draw(&scene, targets);

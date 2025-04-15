@@ -481,6 +481,8 @@ struct RenderTarget{
 	mat4 view;
 	mat4 proj;
 	mat4 VP;
+	bool isLeft = false;
+	bool isRight = false;
 };
 
 struct Uniforms{
@@ -500,6 +502,7 @@ struct Uniforms{
 	int makePoints;
 	int rendermode;
 	int brushColorMode;
+	int intersectionMode;
 	uint32_t fragmentCounter;
 	float splatSize;
 	bool disableFrustumCulling;
