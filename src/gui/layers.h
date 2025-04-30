@@ -20,7 +20,7 @@ string formatShortMemMsg(uint64_t memory){
 	return msg;
 }
 
-void make_layeritem_triangles(SNTriangles* node, int i){
+void make_layeritem_triangles(shared_ptr<SNTriangles> node, int i){
 
 	auto editor = SplatEditor::instance;
 	auto& settings = editor->settings;
@@ -32,11 +32,13 @@ void make_layeritem_triangles(SNTriangles* node, int i){
 
 	ImGui::TableNextRow(ImGuiTableRowFlags_None, row_min_height);
 
+	float offsetToCenterY = 12.0f;
+
 	{ // COLUMN - SELECTABLE
 		ImGui::TableNextColumn();
 
 		ImGuiSelectableFlags selectable_flags = ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap;
-		string id = format("{}##{}", name, uint64_t(node));
+		string id = format("{}##{}", name, uint64_t(node.get()));
 		if (ImGui::Selectable(id.c_str(), node->selected, selectable_flags, ImVec2(0, row_min_height))) {
 			scene.deselectAllNodes();
 			node->selected = true;
@@ -56,10 +58,24 @@ void make_layeritem_triangles(SNTriangles* node, int i){
 
 	{ // COLUMN MEMORY
 		ImGui::TableNextColumn();
+
 		
+
+		double millions = double(node->data.count) / 1'000'000.0;
 		uint64_t memory = node->getGpuMemoryUsage();
 		string msg = formatShortMemMsg(memory);
+
+		msg = format("{:4.1f} M \n{:>7} ", millions, msg);
+
+		// println("{}", msg);
+
+		float cy = ImGui::GetCursorPosY();
+		ImGui::SetCursorPosY(cy + offsetToCenterY);
 		ImGui::Text(msg.c_str());
+		
+		// uint64_t memory = node->getGpuMemoryUsage();
+		// string msg = formatShortMemMsg(memory);
+		// ImGui::Text(msg.c_str());
 	}
 
 	
@@ -479,6 +495,11 @@ void makeTable(){
 
 			onTypeMatch<SNSplats>(node, [&](shared_ptr<SNSplats> node) {
 				make_layeritem_splats(node, i);
+				i++;
+			});
+
+			onTypeMatch<SNTriangles>(node, [&](shared_ptr<SNTriangles> node) {
+				make_layeritem_triangles(node, i);
 				i++;
 			});
 

@@ -326,7 +326,27 @@ int main(){
 					if(hasSceneJson && hasAssetDir && hasSplatsDir){
 						SplatsyFilesLoader::load(path + "/scene.json", editor->scene, *Runtime::controls);
 					}
-				
+				}else if(iEndsWith(path, ".glb")){
+					// auto glb = GLBLoader::load(path);
+
+					// shared_ptr<SNTriangles> node = make_shared<SNTriangles>(path);
+					// node->set(glb.positions, glb.uvs);
+					// node->setTexture(glb.textureSize, glb.texture->data);
+
+					// editor->scene.world->children.push_back(node);
+
+					// Runtime::controls->focus(node->aabb.min, node->aabb.max, 1.0f);
+
+
+					GLBLoader::load(path, [&](GLB glb){
+						shared_ptr<SNTriangles> node = make_shared<SNTriangles>(path);
+						node->set(glb.positions, glb.uvs);
+						node->setTexture(glb.textureSize, glb.texture->data);
+
+						editor->scene.world->children.push_back(node);
+
+						Runtime::controls->focus(node->aabb.min, node->aabb.max, 1.0f);
+					});
 				}
 
 				

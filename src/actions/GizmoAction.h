@@ -250,6 +250,30 @@ struct GizmoAction : public InputAction{
 				}
 			}
 
+		}else if (dynamic_pointer_cast<SNTriangles>(node)) {
+			shared_ptr<SNTriangles> triangleNode = dynamic_pointer_cast<SNTriangles>(node);
+			// GaussianData& data = splatNode->dmng.data;
+
+
+			ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+			if(ImGuizmo::Manipulate(fView, fProj, mCurrentGizmoOperation, mCurrentGizmoMode, (float*)&matrix, (float*)&delta, nullptr)){
+				// node->transform = delta * data.transform;
+				
+				// cummulative = delta * cummulative;
+
+				if(mode == GIZMO_SCALE){
+					cummulative = (trans * delta * inverse(trans)) * cummulative;
+					node->transform = trans * delta * inverse(trans) * node->transform;
+				}else{
+					cummulative = delta * cummulative;
+					node->transform = delta * node->transform;
+				}
+
+				if(currentUndoAction){
+					currentUndoAction->transform = cummulative;
+				}
+			}
+
 		}
 
 		if(Runtime::measureTimings){

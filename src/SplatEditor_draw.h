@@ -1364,7 +1364,7 @@ void SplatEditor::draw(Scene* scene, vector<RenderTarget> targets){
 	scene->forEach<SNTriangles>([&](SNTriangles* node) {
 		if (!node->visible) return;
 
-		node->data.transform = node->transform;
+		node->data.transform = node->transform_global;
 
 		Runtime::numRenderedTriangles += node->data.count;
 

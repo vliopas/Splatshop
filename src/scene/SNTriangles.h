@@ -83,7 +83,15 @@ struct SNTriangles : public SceneNode{
 	}
 
 	uint64_t getGpuMemoryUsage(){
-		return 0;
+		int64_t sum = 0;
+
+		sum += CURuntime::getSize((CUdeviceptr)data.position);
+		sum += CURuntime::getSize((CUdeviceptr)data.uv);
+		sum += CURuntime::getSize((CUdeviceptr)data.colors);
+		sum += CURuntime::getSize((CUdeviceptr)data.indices);
+		sum += CURuntime::getSize((CUdeviceptr)material.texture.data);
+
+		return sum;
 	}
 
 };

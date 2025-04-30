@@ -8,6 +8,8 @@
 
 #define CUB_DISABLE_BF16_SUPPORT
 
+#define USE_FAST_CONFIG
+
 #define GLM_FORCE_CUDA
 #define CUDA_VERSION 12000
 

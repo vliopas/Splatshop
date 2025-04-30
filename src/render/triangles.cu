@@ -29,6 +29,50 @@ __device__ uint32_t numProcessedTriangles;
 __device__ uint32_t veryLargeTriangleIndices[MAX_VERYLARGE_TRIANGLES];
 __device__ uint32_t veryLargeTriangleCounter;
 
+#define RGBA(r, g, b) ((uint32_t(255) << 24) | (uint32_t(r) << 0) | (uint32_t(g) << 8) | (uint32_t(b) << 16))
+
+constexpr uint32_t SPECTRAL[11] = {
+	RGBA(158, 1, 66), 
+	RGBA(213, 62, 79), 
+	RGBA(244, 109, 67),
+	RGBA(253, 174, 97), 
+	RGBA(254, 224, 139), 
+	RGBA(255, 255, 191),
+	RGBA(230, 245, 152), 
+	RGBA(171, 221, 164), 
+	RGBA(102, 194, 165),
+	RGBA(50, 136, 189), 
+	RGBA(94, 79, 162)
+};
+
+
+
+uint32_t sampleSpectral(float u){
+
+	// u = clamp(u, 0.0f, 1.0f);
+	u = fmodf(u, 1.0f);
+	float i = u * 10.0f;
+
+	int i_l = int(floor(i)) % 11;
+	int i_u = int(ceil(i)) % 11;
+	float w = fmodf(i, 1.0f);
+
+	uint32_t a = SPECTRAL[i_l];
+	uint32_t b = SPECTRAL[i_u];
+	uint32_t sample = 0;
+
+	uint8_t* a_rgba = (uint8_t*)&a;
+	uint8_t* b_rgba = (uint8_t*)&b;
+	uint8_t* s_rgba = (uint8_t*)&sample;
+
+	s_rgba[0] = (1.0f - w) * float(a_rgba[0]) + w * float(b_rgba[0]);
+	s_rgba[1] = (1.0f - w) * float(a_rgba[1]) + w * float(b_rgba[1]);
+	s_rgba[2] = (1.0f - w) * float(a_rgba[2]) + w * float(b_rgba[2]);
+	s_rgba[3] = 255;
+
+	return sample;
+}
+
 inline vec4 toScreenCoord(vec3 p, mat4& transform, int width, int height){
 	vec4 pos = transform * vec4{p.x, p.y, p.z, 1.0f};
 
@@ -60,6 +104,7 @@ inline uint32_t computeColor(
 	// color = 0x0000ff00;
 
 	// material.mode = MATERIAL_MODE_UVS;
+
 
 	if(material.mode == MATERIAL_MODE_COLOR){
 		rgb[0] = 255.0f * material.color.r;
@@ -202,6 +247,40 @@ inline uint32_t computeColor(
 			rgb[1] = 255.0f * uv.t;
 		}
 
+		// constexpr float3 SPECTRAL[11] = {
+		// 	float3{158,1,66},
+		// 	float3{213,62,79},
+		// 	float3{244,109,67},
+		// 	float3{253,174,97},
+		// 	float3{254,224,139},
+		// 	float3{255,255,191},
+		// 	float3{230,245,152},
+		// 	float3{171,221,164},
+		// 	float3{102,194,165},
+		// 	float3{50,136,189},
+		// 	float3{94,79,162},
+		// };
+
+
+
+		// rgb[0] = SPECTRAL[5].x;
+		// rgb[1] = SPECTRAL[5].y;
+		// rgb[2] = SPECTRAL[5].z;
+
+		// int n = 2'700'000;
+		// int n = 48'700'000;
+		// int n = triangles.count;
+		// // int i = clamp(11.0f * (float(triangleIndex) / float(n)), 0.0f, 10.0f);
+		// // rgb[0] = SPECTRAL[i].x;
+		// // rgb[1] = SPECTRAL[i].y;
+		// // rgb[2] = SPECTRAL[i].z;
+
+		// if(triangleIndex % 50 != 0) color = 0;
+
+		// if(triangleIndex < 48'700'000){
+		// 	color = 0xff00ff00;
+		// }
+
 	}else{
 		// color = 0xff0000ff;
 	}
@@ -213,6 +292,173 @@ inline uint32_t computeColor(
 	// color = triangleIndex * 123456;
 
 	return color;
+}
+
+
+
+void rasterizeTriangles_block(
+	TriangleData geometry,
+	TriangleMaterial material,
+	uint32_t triangleOffset,
+	CommonLaunchArgs args,
+	RenderTarget target
+){
+	auto block = cg::this_thread_block();
+
+	// mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
+	mat4 transform = target.proj * target.view * geometry.transform;
+
+	__shared__ vec3 sh_positions[3 * TRIANGLES_PER_SWEEP];
+	__shared__ vec2 sh_uvs[3 * TRIANGLES_PER_SWEEP];
+
+	int numTrianglesInBlock = min(int(geometry.count) - triangleOffset, TRIANGLES_PER_SWEEP);
+
+	if(numTrianglesInBlock <= 0) return;
+
+	// load triangles into shared memory
+	for(
+		int i = block.thread_rank();
+		i < numTrianglesInBlock;
+		i += block.size()
+	){
+		int triangleIndex = triangleOffset + i;
+		sh_positions[3 * i + 0] = geometry.position[3 * triangleIndex + 0];
+		sh_positions[3 * i + 1] = geometry.position[3 * triangleIndex + 1];
+		sh_positions[3 * i + 2] = geometry.position[3 * triangleIndex + 2];
+
+		sh_uvs[3 * i + 0] = geometry.uv[3 * triangleIndex + 0];
+		sh_uvs[3 * i + 1] = geometry.uv[3 * triangleIndex + 1];
+		sh_uvs[3 * i + 2] = geometry.uv[3 * triangleIndex + 2];
+	}
+
+	block.sync();
+
+	// draw triangles
+	for(
+		int i = block.thread_rank();
+		i < numTrianglesInBlock;
+		i += block.size()
+	){
+		int triangleIndex = triangleOffset + i;
+		
+		vec3 v_0 = sh_positions[3 * i + 0];
+		vec3 v_1 = sh_positions[3 * i + 1];
+		vec3 v_2 = sh_positions[3 * i + 2];
+
+		vec4 p_0 = toScreenCoord(v_0, transform, target.width, target.height);
+		vec4 p_1 = toScreenCoord(v_1, transform, target.width, target.height);
+		vec4 p_2 = toScreenCoord(v_2, transform, target.width, target.height);
+
+		if(p_0.w < 0.0f || p_1.w < 0.0f || p_2.w < 0.0f) continue;
+
+		vec2 v_01 = {p_1.x - p_0.x, p_1.y - p_0.y};
+		vec2 v_02 = {p_2.x - p_0.x, p_2.y - p_0.y};
+
+		auto cross = [](vec2 a, vec2 b){ return a.x * b.y - a.y * b.x; };
+
+		{// backface culling
+			float w = cross(v_01, v_02);
+			if(w < 0.0) continue;
+		}
+
+		// compute screen-space bounding rectangle
+		float min_x = min(min(p_0.x, p_1.x), p_2.x);
+		float min_y = min(min(p_0.y, p_1.y), p_2.y);
+		float max_x = max(max(p_0.x, p_1.x), p_2.x);
+		float max_y = max(max(p_0.y, p_1.y), p_2.y);
+
+		// clamp to screen
+		min_x = clamp(min_x, 0.0f, (float)target.width);
+		min_y = clamp(min_y, 0.0f, (float)target.height);
+		max_x = clamp(max_x, 0.0f, (float)target.width);
+		max_y = clamp(max_y, 0.0f, (float)target.height);
+
+		int size_x = ceil(max_x) - floor(min_x);
+		int size_y = ceil(max_y) - floor(min_y);
+		int numFragments = size_x * size_y;
+
+		if(numFragments > 40'000){
+			// uint32_t index = atomicAdd(&veryLargeTriangleCounter, 1);
+			// veryLargeTriangleIndices[index] = triangleIndex;
+			continue;
+		}else if(numFragments > 4024){
+			// TODO: schedule block-wise rasterization
+			// uint32_t index = atomicAdd(&largeTriangleSchedule.numTriangles, 1);
+			// largeTriangleSchedule.indices[index] = triangleIndex;
+			continue;
+		}
+
+		int numProcessedSamples = 0;
+		for(int fragOffset = 0; fragOffset < numFragments; fragOffset += 1){
+
+			// safety mechanism: don't draw more than <x> pixels per thread
+			if(numProcessedSamples > 4000) break;
+
+			int fragID = fragOffset; // + block.thread_rank();
+			int fragX = fragID % size_x;
+			int fragY = fragID / size_x;
+
+			vec2 pFrag = {
+				floor(min_x) + float(fragX), 
+				floor(min_y) + float(fragY)
+			};
+			vec2 sample = {pFrag.x - p_0.x, pFrag.y - p_0.y};
+
+			// v: vertex[0], s: vertex[1], t: vertex[2]
+			float s = cross(sample, v_02) / cross(v_01, v_02);
+			float t = cross(v_01, sample) / cross(v_01, v_02);
+			float v = 1.0f - (s + t);
+
+			int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
+			int pixelID = pixelCoords.x + pixelCoords.y * target.width;
+			pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
+
+			bool isInsideTriangle = (s >= 0.0f) && (t >= 0.0f) && (v >= 0.0f);
+			// if(numFragments == 1) isInsideTriangle = true;
+
+			// Draw every xth triangle as a point instead.
+			// if(triangleIndex % 100 != 0) continue;
+			// if(triangleIndex % 100 > 10) continue;
+			// #define PROTOTYPE_SUBSAMPLING
+			// #if defined(PROTOTYPE_SUBSAMPLING)
+			// if(numFragments == 1){
+			// 	// PROTOTYPING/DEBUGGING
+			// 	uint32_t color = computeColor(triangleIndex, geometry, material, material.texture, s, t, v);
+			// 	if((color & 0xff000000) == 0) continue;
+				
+			// 	float depth = p_0.w;
+			// 	uint64_t udepth = *((uint32_t*)&depth);
+			// 	uint64_t pixel = (udepth << 32ull) | color;
+
+			// 	atomicMin(&target.framebuffer[pixelID + 0], pixel);
+			// 	atomicMin(&target.framebuffer[pixelID + 1], pixel);
+			// 	atomicMin(&target.framebuffer[pixelID + target.width + 0], pixel);
+			// 	atomicMin(&target.framebuffer[pixelID + target.width + 1], pixel);
+			// }
+			// #endif
+
+			if(isInsideTriangle){
+				uint32_t color = computeColor(triangleIndex, geometry, material, material.texture, s, t, v);
+				uint8_t* rgb = (uint8_t*)&color;
+
+				// color = sampleSpectral(float(2 * triangleIndex) / float(geometry.count));
+				// color = sampleSpectral(floor(11.0f * float(2 * triangleIndex) / float(geometry.count)) / 11.0f);
+
+				float depth = v * p_0.w + s * p_1.w + t * p_2.w;
+				uint64_t udepth = *((uint32_t*)&depth);
+				uint64_t pixel = (udepth << 32ull) | color;
+
+				atomicMin(&target.framebuffer[pixelID], pixel);
+			}
+			
+
+			numProcessedSamples++;
+		}
+	}
+
+	block.sync();
+
+	
 }
 
 inline void rasterizeVeryLargeTriangles(
@@ -605,155 +851,6 @@ void kernel_drawTriangles(CommonLaunchArgs args, TriangleData triangles, Triangl
 
 	rasterizeTriangles(triangles, args, material, texture, target);
 }
-
-
-
-
-
-
-void rasterizeTriangles_block(
-	TriangleData geometry,
-	TriangleMaterial material,
-	uint32_t triangleOffset,
-	CommonLaunchArgs args,
-	RenderTarget target
-){
-	auto block = cg::this_thread_block();
-
-	// mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
-	mat4 transform = target.proj * target.view * geometry.transform;
-
-	__shared__ vec3 sh_positions[3 * TRIANGLES_PER_SWEEP];
-	__shared__ vec2 sh_uvs[3 * TRIANGLES_PER_SWEEP];
-
-	int numTrianglesInBlock = min(int(geometry.count) - triangleOffset, TRIANGLES_PER_SWEEP);
-
-	if(numTrianglesInBlock <= 0) return;
-
-	// load triangles into shared memory
-	for(
-		int i = block.thread_rank();
-		i < numTrianglesInBlock;
-		i += block.size()
-	){
-		int triangleIndex = triangleOffset + i;
-		sh_positions[3 * i + 0] = geometry.position[3 * triangleIndex + 0];
-		sh_positions[3 * i + 1] = geometry.position[3 * triangleIndex + 1];
-		sh_positions[3 * i + 2] = geometry.position[3 * triangleIndex + 2];
-
-		sh_uvs[3 * i + 0] = geometry.uv[3 * triangleIndex + 0];
-		sh_uvs[3 * i + 1] = geometry.uv[3 * triangleIndex + 1];
-		sh_uvs[3 * i + 2] = geometry.uv[3 * triangleIndex + 2];
-	}
-
-	block.sync();
-
-	// draw triangles
-	for(
-		int i = block.thread_rank();
-		i < numTrianglesInBlock;
-		i += block.size()
-	){
-		int triangleIndex = triangleOffset + i;
-		
-		vec3 v_0 = sh_positions[3 * i + 0];
-		vec3 v_1 = sh_positions[3 * i + 1];
-		vec3 v_2 = sh_positions[3 * i + 2];
-
-		vec4 p_0 = toScreenCoord(v_0, transform, target.width, target.height);
-		vec4 p_1 = toScreenCoord(v_1, transform, target.width, target.height);
-		vec4 p_2 = toScreenCoord(v_2, transform, target.width, target.height);
-
-		if(p_0.w < 0.0f || p_1.w < 0.0f || p_2.w < 0.0f) continue;
-
-		vec2 v_01 = {p_1.x - p_0.x, p_1.y - p_0.y};
-		vec2 v_02 = {p_2.x - p_0.x, p_2.y - p_0.y};
-
-		auto cross = [](vec2 a, vec2 b){ return a.x * b.y - a.y * b.x; };
-
-		{// backface culling
-			float w = cross(v_01, v_02);
-			if(w < 0.0) continue;
-		}
-
-		// compute screen-space bounding rectangle
-		float min_x = min(min(p_0.x, p_1.x), p_2.x);
-		float min_y = min(min(p_0.y, p_1.y), p_2.y);
-		float max_x = max(max(p_0.x, p_1.x), p_2.x);
-		float max_y = max(max(p_0.y, p_1.y), p_2.y);
-
-		// clamp to screen
-		min_x = clamp(min_x, 0.0f, (float)target.width);
-		min_y = clamp(min_y, 0.0f, (float)target.height);
-		max_x = clamp(max_x, 0.0f, (float)target.width);
-		max_y = clamp(max_y, 0.0f, (float)target.height);
-
-		int size_x = ceil(max_x) - floor(min_x);
-		int size_y = ceil(max_y) - floor(min_y);
-		int numFragments = size_x * size_y;
-
-		if(numFragments > 40'000){
-			// uint32_t index = atomicAdd(&veryLargeTriangleCounter, 1);
-			// veryLargeTriangleIndices[index] = triangleIndex;
-			continue;
-		}else if(numFragments > 4024){
-			// TODO: schedule block-wise rasterization
-			// uint32_t index = atomicAdd(&largeTriangleSchedule.numTriangles, 1);
-			// largeTriangleSchedule.indices[index] = triangleIndex;
-			continue;
-		}
-
-		int numProcessedSamples = 0;
-		for(int fragOffset = 0; fragOffset < numFragments; fragOffset += 1){
-
-			// safety mechanism: don't draw more than <x> pixels per thread
-			if(numProcessedSamples > 4000) break;
-
-			int fragID = fragOffset; // + block.thread_rank();
-			int fragX = fragID % size_x;
-			int fragY = fragID / size_x;
-
-			vec2 pFrag = {
-				floor(min_x) + float(fragX), 
-				floor(min_y) + float(fragY)
-			};
-			vec2 sample = {pFrag.x - p_0.x, pFrag.y - p_0.y};
-
-			// v: vertex[0], s: vertex[1], t: vertex[2]
-			float s = cross(sample, v_02) / cross(v_01, v_02);
-			float t = cross(v_01, sample) / cross(v_01, v_02);
-			float v = 1.0f - (s + t);
-
-			int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
-			int pixelID = pixelCoords.x + pixelCoords.y * target.width;
-			pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
-
-			if(s >= 0.0f)
-			if(t >= 0.0f)
-			if(v >= 0.0f)
-			{
-				uint32_t color = computeColor(triangleIndex, geometry, material, material.texture, s, t, v);
-
-				// if((color >> 24) == 0){
-				// 	color = target.framebuffer[pixelID] & 0xffffffff;
-				// }
-
-				float depth = v * p_0.w + s * p_1.w + t * p_2.w;
-				uint64_t udepth = *((uint32_t*)&depth);
-				uint64_t pixel = (udepth << 32ull) | color;
-
-				atomicMin(&target.framebuffer[pixelID], pixel);
-			}
-
-			numProcessedSamples++;
-		}
-	}
-
-	block.sync();
-
-	
-}
-
 
 
 extern "C" __global__

@@ -19,6 +19,11 @@
 		"xutility": "cpp",
 		"ostream": "cpp",
 		"print": "cpp",
-		"xstring": "cpp"
+		"xstring": "cpp",
+		"vector": "cpp",
+		"limits": "cpp",
+		"random": "cpp",
+		"valarray": "cpp",
+		"ratio": "cpp"
 	}
 }
