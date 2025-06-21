@@ -1,4 +1,6 @@
-# Splatshop (v0.01f)
+# Splatshop 
+
+Paper: [Splatshop: Efficiently Editing Large Gaussian Splat Models](https://diglib.eg.org/bitstream/handle/10.1111/cgf70214/cgf70214.pdf), Markus Schütz, Christoph Peters, Florian Hahlbohm, Elmar Eisemann, Marcus Magnor, Michael Wimmer, Computer Graphics Forum 2025
 
 This editor aims to enable editing of [gaussian splat models](https://github.com/graphdeco-inria/gaussian-splatting), e.g., cleaning up reconstructed models, assembling cleaned-up assets into a library, composing scenes, and painting. It currently supports up to a hundred million splats on desktop and up to around ten million in VR on an RTX 4090. 
 
@@ -222,3 +224,17 @@ for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-ga
 * Omar's [Dear ImGui](https://github.com/ocornut/imgui). 
 * This particular garden model is a pretrained model from [Inria 3DGS](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) and rotated to fit our editor. The garden data set originates from [Mip-NeRF 360: Unbounded Anti-Aliased Neural Radiance Fields](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9878829).
 * [SuperSplat](https://superspl.at/) - A web-based gaussian splat editor, from which we learned the usefullness of the ring rendering mode for editing, especially finding and removing floaters. 
+
+## Citation
+
+<pre>
+@article{10.1111:cgf.70214,
+	journal = {Computer Graphics Forum},
+	title = {{Splatshop: Efficiently Editing Large Gaussian Splat Models}},
+	author = {Schütz, Markus and Peters, Christoph and Hahlbohm, Florian and Eisemann, Elmar and Magnor, Marcus and Wimmer, Michael},
+	year = {2025},
+	publisher = {The Eurographics Association and John Wiley & Sons Ltd.},
+	ISSN = {1467-8659},
+	DOI = {10.1111/cgf.70214}
+}
+</pre>
