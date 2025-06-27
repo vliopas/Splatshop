@@ -52,6 +52,9 @@ target_include_directories(${TARGET_NAME} PRIVATE
 	./src
 )
 
+target_compile_definitions(${TARGET_NAME}
+    PRIVATE PROJECT_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\")
+
 #enable_language(CUDA)
 
 # add some third-party libraries
@@ -64,13 +67,26 @@ ADD_IMGUIZMO(${TARGET_NAME})
 target_include_directories(${TARGET_NAME} PRIVATE ./include)
 target_include_directories(${TARGET_NAME} PRIVATE ./libs)
 
+target_link_libraries(${TARGET_NAME} 
+    CUDA::cuda_driver      # cuda.lib
+    CUDA::nvJitLink)       # nvJitLink.lib
+
 # I give up, let's just include OpenVR like this.
 target_include_directories(${TARGET_NAME} PRIVATE ./libs/openvr/headers)
 if (WIN32)
 	target_link_libraries(${TARGET_NAME} ../libs/openvr/lib/win64/openvr_api)
-	add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy "$(SolutionDir)../libs/openvr/bin/win64/openvr_api.dll" "$(OutDir)"
-		COMMENT "POST BUILD: copying openvr folder")
+
+    # OpenVR API DLL
+    # This is the OpenVR API DLL that we need to copy next to the built .exe
+    set(OPENVR_DLL
+        "${CMAKE_SOURCE_DIR}/libs/openvr/bin/win64/openvr_api.dll")
+
+    # Copy the OpenVR API DLL to the output directory after build
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${OPENVR_DLL}"
+                "$<TARGET_FILE_DIR:${TARGET_NAME}>"
+        COMMENT "POST BUILD: copying openvr_api.dll")
 else()
 	add_compile_definitions(NO_OPENVR)
 endif (WIN32)

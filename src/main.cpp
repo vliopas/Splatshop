@@ -41,40 +41,58 @@ void initCuda(){
 
 void initScene() {
 
-	Runtime::controls->yaw    = -1.325;
-	Runtime::controls->pitch  = -0.330;
-	Runtime::controls->radius = 4.691;
-	Runtime::controls->target = { -0.028, -0.100, 2.301, };
+	Runtime::controls->yaw    = -3.495;
+	Runtime::controls->pitch  = -0.472;
+	Runtime::controls->radius = 12.203;
+	Runtime::controls->target = { 0.443, 0.579, 2.399, };
+
+
+	string path = fs::path(PROJECT_ROOT_DIR).string() + "/resources/australia_gas.glb";
+	GLBLoader::load(path, [&](GLB glb){
+		shared_ptr<SNTriangles> node = make_shared<SNTriangles>(path);
+		node->set(glb.positions, glb.uvs);
+		node->setTexture(glb.textureSize, glb.texture->data);
+		node->transform = mat4{
+			 0.994,     -0.040,      0.101,      0.000,
+			-0.080,      0.358,      0.930,      0.000,
+			-0.074,     -0.933,      0.353,      0.000,
+			-0.930,     -1.973,      4.906,      1.000,
+		};
+
+		editor->scene.world->children.push_back(node);
+
+		// Runtime::controls->focus(node->aabb.min, node->aabb.max, 1.0f);
+	});
 
 	// SplatsyFilesLoader::load("./savefile_ref/scene.json", editor->scene, *Runtime::controls);
 	// SplatsyFilesLoader::load("./splatmodels_lantern/scene.json", editor->scene, *Runtime::controls);
 
 	// string path = "./gaussians_w_pca.ply";
 	// string path = "./splatmodels_benchmark_garden_far/scene.json";
-	string path = "./splatmodels/scene.json";
-	// string path = "E:/resources/gaussian_splats/garden.ply";
-	// string path = "E:/resources/splats/gardentable.ply";
-	// string path = "./splatmodels_3dgs_and_perspcorrect/scene.json";
-	// string path = "/home/hahlbohm/code/nerficg_public/nerficg/output/HTGS/htgs_garden_2025-03-06-20-25-48/gaussians.ply";
-	// string path = "F:/SplatEditor/city_gaussians_mc_aerial_c36.ply";
-	// string path = "F:/SplatEditor/splatmodels.json";
+	// string path = "./splatmodels/scene.json";
+	// // string path = "E:/resources/gaussian_splats/garden.ply";
+	// // string path = "E:/resources/splats/gardentable.ply";
+	// // string path = "./splatmodels_3dgs_and_perspcorrect/scene.json";
+	// // string path = "/home/hahlbohm/code/nerficg_public/nerficg/output/HTGS/htgs_garden_2025-03-06-20-25-48/gaussians.ply";
+	// // string path = "F:/SplatEditor/city_gaussians_mc_aerial_c36.ply";
+	// // string path = "F:/SplatEditor/splatmodels.json";
 
-	if(fs::exists(path)){
-		if(iEndsWith(path, ".json")){
-			SplatsyFilesLoader::load(path, editor->scene, *Runtime::controls);
-		}else if(iEndsWith(path, ".ply")){
-			auto splats = GSPlyLoader::load(path);
-			shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
-			editor->scene.world->children.push_back(node);
-		}
+	// if(fs::exists(path)){
+	// 	if(iEndsWith(path, ".json")){
+	// 		SplatsyFilesLoader::load(path, editor->scene, *Runtime::controls);
+	// 	}else if(iEndsWith(path, ".ply")){
+	// 		auto splats = GSPlyLoader::load(path);
+	// 		shared_ptr<SNSplats> node = make_shared<SNSplats>(splats->name, splats);
+	// 		editor->scene.world->children.push_back(node);
+	// 	}
 
-		// Runtime::controls->yaw    = 3.155;
-		// Runtime::controls->pitch  = -0.220;
-		// Runtime::controls->radius = 3.877;
-		// Runtime::controls->target = { 0.353, 0.518, 1.240, };
-	}else{
-		println("Could not find file {}", path);
-	}
+	// 	// Runtime::controls->yaw    = 3.155;
+	// 	// Runtime::controls->pitch  = -0.220;
+	// 	// Runtime::controls->radius = 3.877;
+	// 	// Runtime::controls->target = { 0.353, 0.518, 1.240, };
+	// }else{
+	// 	println("Could not find file {}", path);
+	// }
 
 	
 	// {// Lot's of gardens
