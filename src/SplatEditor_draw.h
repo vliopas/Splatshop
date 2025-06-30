@@ -1502,7 +1502,11 @@ void SplatEditor::draw(Scene* scene, vector<RenderTarget> targets){
 				OptionalLaunchSettings settings = { 0 };
 				settings.blocksize = 64;
 				settings.stream = mainstream;
-				prog_triangles->launchCooperative("kernel_drawTriangleQueue", { &launchArgs, &queue, &target }, settings);
+
+                if(SplatEditor::instance->settings.rasterizeLargeTriangles)
+				    prog_triangles->launchCooperative("kernel_drawLargeTriangleQueue", { &launchArgs, &queue, &target }, settings);
+                else
+                    prog_triangles->launchCooperative("kernel_drawTriangleQueue", { &launchArgs, &queue, &target }, settings);
 			}
 		}
 

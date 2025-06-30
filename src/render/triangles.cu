@@ -294,6 +294,150 @@ inline uint32_t computeColor(
 	return color;
 }
 
+void rasterizeLargeTriangles_block(
+	TriangleData geometry,
+	TriangleMaterial material,
+	uint32_t triangleOffset,
+	CommonLaunchArgs args,
+	RenderTarget target
+){
+	auto block = cg::this_thread_block();
+
+	// mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
+	mat4 transform = target.proj * target.view * geometry.transform;
+
+	__shared__ vec3 sh_positions[3 * TRIANGLES_PER_SWEEP];
+	__shared__ vec2 sh_uvs[3 * TRIANGLES_PER_SWEEP];
+
+	int numTrianglesInBlock = min(int(geometry.count) - triangleOffset, TRIANGLES_PER_SWEEP);
+
+	if(numTrianglesInBlock <= 0) return;
+
+	// load triangles into shared memory
+	for(
+		int i = block.thread_rank();
+		i < numTrianglesInBlock;
+		i += block.size()
+	){
+		int triangleIndex = triangleOffset + i;
+		sh_positions[3 * i + 0] = geometry.position[3 * triangleIndex + 0];
+		sh_positions[3 * i + 1] = geometry.position[3 * triangleIndex + 1];
+		sh_positions[3 * i + 2] = geometry.position[3 * triangleIndex + 2];
+
+		sh_uvs[3 * i + 0] = geometry.uv[3 * triangleIndex + 0];
+		sh_uvs[3 * i + 1] = geometry.uv[3 * triangleIndex + 1];
+		sh_uvs[3 * i + 2] = geometry.uv[3 * triangleIndex + 2];
+	}
+
+	block.sync();
+
+	// draw triangles
+	for(
+		int i = block.thread_rank();
+		i < numTrianglesInBlock;
+		i += block.size()
+	){
+		int triangleIndex = triangleOffset + i;
+		
+		vec3 v_0 = sh_positions[3 * i + 0];
+		vec3 v_1 = sh_positions[3 * i + 1];
+		vec3 v_2 = sh_positions[3 * i + 2];
+
+		vec4 p_0 = toScreenCoord(v_0, transform, target.width, target.height);
+		vec4 p_1 = toScreenCoord(v_1, transform, target.width, target.height);
+		vec4 p_2 = toScreenCoord(v_2, transform, target.width, target.height);
+
+		if(p_0.w < 0.0f || p_1.w < 0.0f || p_2.w < 0.0f) continue;
+
+		vec2 v_01 = {p_1.x - p_0.x, p_1.y - p_0.y};
+		vec2 v_02 = {p_2.x - p_0.x, p_2.y - p_0.y};
+
+		auto cross = [](vec2 a, vec2 b){ return a.x * b.y - a.y * b.x; };
+
+		{// backface culling
+			float w = cross(v_01, v_02);
+			if(w < 0.0) continue;
+		}
+
+		// compute screen-space bounding rectangle
+		float min_x = min(min(p_0.x, p_1.x), p_2.x);
+		float min_y = min(min(p_0.y, p_1.y), p_2.y);
+		float max_x = max(max(p_0.x, p_1.x), p_2.x);
+		float max_y = max(max(p_0.y, p_1.y), p_2.y);
+
+		// clamp to screen
+		min_x = clamp(min_x, 0.0f, (float)target.width);
+		min_y = clamp(min_y, 0.0f, (float)target.height);
+		max_x = clamp(max_x, 0.0f, (float)target.width);
+		max_y = clamp(max_y, 0.0f, (float)target.height);
+
+		int size_x = ceil(max_x) - floor(min_x);
+		int size_y = ceil(max_y) - floor(min_y);
+		int numFragments = size_x * size_y;
+
+		// if(numFragments > 40'000){
+		// 	// uint32_t index = atomicAdd(&veryLargeTriangleCounter, 1);
+		// 	// veryLargeTriangleIndices[index] = triangleIndex;
+		// 	continue;
+		// }else if(numFragments > 4024){
+		// 	// TODO: schedule block-wise rasterization
+		// 	// uint32_t index = atomicAdd(&largeTriangleSchedule.numTriangles, 1);
+		// 	// largeTriangleSchedule.indices[index] = triangleIndex;
+		// 	continue;
+		// }
+        if (numFragments <= 4024) continue;
+
+		int numProcessedSamples = 0;
+		for(int fragOffset = 0; fragOffset < numFragments; fragOffset += 1){
+
+			// safety mechanism: don't draw more than <x> pixels per thread
+			// if(numProcessedSamples > 4000) break;
+
+			int fragID = fragOffset; // + block.thread_rank();
+			int fragX = fragID % size_x;
+			int fragY = fragID / size_x;
+
+			vec2 pFrag = {
+				floor(min_x) + float(fragX), 
+				floor(min_y) + float(fragY)
+			};
+			vec2 sample = {pFrag.x - p_0.x, pFrag.y - p_0.y};
+
+			// v: vertex[0], s: vertex[1], t: vertex[2]
+			float s = cross(sample, v_02) / cross(v_01, v_02);
+			float t = cross(v_01, sample) / cross(v_01, v_02);
+			float v = 1.0f - (s + t);
+
+			int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
+			int pixelID = pixelCoords.x + pixelCoords.y * target.width;
+			pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
+
+			bool isInsideTriangle = (s >= 0.0f) && (t >= 0.0f) && (v >= 0.0f);
+
+			if(isInsideTriangle){
+				uint32_t color = computeColor(triangleIndex, geometry, material, material.texture, s, t, v);
+				uint8_t* rgb = (uint8_t*)&color;
+
+				// color = sampleSpectral(float(2 * triangleIndex) / float(geometry.count));
+				// color = sampleSpectral(floor(11.0f * float(2 * triangleIndex) / float(geometry.count)) / 11.0f);
+
+				float depth = v * p_0.w + s * p_1.w + t * p_2.w;
+				uint64_t udepth = *((uint32_t*)&depth);
+				uint64_t pixel = (udepth << 32ull) | color;
+
+				atomicMin(&target.framebuffer[pixelID], pixel);
+			}
+			
+
+			numProcessedSamples++;
+		}
+	}
+
+	block.sync();
+
+	
+}
+
 
 
 void rasterizeTriangles_block(
@@ -919,11 +1063,74 @@ void kernel_drawTriangleQueue(CommonLaunchArgs args, TriangleModelQueue queue, R
 		rasterizeTriangles_block(sh_geometry, sh_material, sh_blockLocalTriangleOffset, args, target);
 
 	}
+}
+
+extern "C" __global__
+void kernel_drawLargeTriangleQueue(CommonLaunchArgs args, TriangleModelQueue queue, RenderTarget target){
+
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	if(grid.thread_rank() == 0){
+		numProcessedTriangles = 0;
+		veryLargeTriangleCounter = 0;
+	}
 
 
+	__shared__ int sh_blockTriangleOffset;       // the global offset to the set of triangles that this block should render
+	__shared__ int sh_blockLocalTriangleOffset;  // the "local" offset relative to the current triangle queue element
+	__shared__ int sh_triangleQueueIndex;        // the index of the current triangle queue element
+	__shared__ TriangleData sh_geometry;
+	__shared__ TriangleMaterial sh_material;
+	
 
 
+	if(block.thread_rank() == 0){
+		sh_blockTriangleOffset      = 0;
+		sh_blockLocalTriangleOffset = 0;
+		sh_triangleQueueIndex       = 0;
+		sh_geometry                 = queue.geometries[0];
+		sh_material                 = queue.materials[0];
+	}
 
+	grid.sync();
+
+	while(true){
+
+		// Check which batch of triangles this block should render next.
+		block.sync();
+		if(block.thread_rank() == 0){
+			uint32_t next = atomicAdd(&numProcessedTriangles, TRIANGLES_PER_SWEEP);
+			uint32_t diff = next - sh_blockTriangleOffset;
+
+			sh_blockTriangleOffset = next;
+			sh_blockLocalTriangleOffset += diff;
+
+			// if((numProcessedTriangles / TRIANGLES_PER_SWEEP) % 1000 == 0){
+			// 	printf("%8u, %8u \n", sh_blockTriangleOffset, sh_blockLocalTriangleOffset);
+			// }
+
+			// The next global triangle index may be multiple queued geometries ahead.
+			// Let this block advance to the correct geometry
+			while(sh_blockLocalTriangleOffset > sh_geometry.count){
+				sh_triangleQueueIndex++;
+
+				if(sh_triangleQueueIndex >= queue.count) break;
+
+				sh_blockLocalTriangleOffset -= sh_geometry.count;
+
+				sh_geometry = queue.geometries[sh_triangleQueueIndex];
+				sh_material = queue.materials[sh_triangleQueueIndex];
+
+			}
+		}
+		block.sync();
+
+		if(sh_triangleQueueIndex >= queue.count) break;
+
+		rasterizeLargeTriangles_block(sh_geometry, sh_material, sh_blockLocalTriangleOffset, args, target);
+
+	}
 }
 
 extern "C" __global__

@@ -697,6 +697,7 @@ void SplatEditor::makeToolbar(){
 
 			ImGui::SameLine();
 			ImGui::Checkbox("Cull Small Splats", &settings.cullSmallSplats);
+            ImGui::Checkbox("Rasterize Large Triangles", &settings.rasterizeLargeTriangles);
 
 			// ImGui::SameLine(); ImGui::Text("          ");
 
