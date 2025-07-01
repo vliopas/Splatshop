@@ -1,4 +1,4 @@
-#include <deque>
+﻿#include <deque>
 #include "imutils.h"
 
 
@@ -242,11 +242,13 @@ void makeTimings(){
 
 	if(settings.showTimingInfos){
 
-		ImVec2 windowSize = {800, 700};
-		ImGui::SetNextWindowPos({
-			GLRenderer::width - windowSize.x - 10,
-			(GLRenderer::height - windowSize.y) / 2, }, 
-			ImGuiCond_Once);
+		ImVec2 windowSize = {400, 500};
+		ImGui::SetNextWindowPos(
+			ImVec2(0.995f * GLRenderer::width, 
+				   0.55f * GLRenderer::height),
+			ImGuiCond_Always, // practically disables manual repositioning - should be fine
+			ImVec2(1.0f, 0.5f)
+		);
 		ImGui::SetNextWindowSize(windowSize, ImGuiCond_Once);
 
 		if(ImGui::Begin("Timings")){

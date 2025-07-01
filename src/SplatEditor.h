@@ -232,7 +232,7 @@ struct SplatEditor{
 		bool showEditing = true;
 		bool showKernelInfos = false;
 		bool showMemoryInfos = false;
-		bool showTimingInfos = false;
+		bool showTimingInfos = true;
 		bool showStats = false;
 		bool showFileSaveDialog = false;
 		bool showGettingStarted = false;

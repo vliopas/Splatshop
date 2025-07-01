@@ -96,7 +96,7 @@ struct Runtime{
 		string label;
 		float milliseconds;
 	};
-	inline static bool measureTimings;
+	inline static bool measureTimings = true;
 	inline static Timings timings;
 	inline static vector<StartStop> profileTimings;
 
