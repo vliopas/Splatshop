@@ -20,10 +20,15 @@ namespace std{
 #include "../utils.cuh"
 
 #include "../HostDeviceInterface.h"
+#include "raster_utils.cuh"
 
 
 constexpr int TRIANGLES_PER_SWEEP = 32;
 constexpr int MAX_VERYLARGE_TRIANGLES = 10 * 1024;
+
+// for shared memory allocation 
+constexpr int MAX_BIN_SIZE = 64;
+constexpr int MAX_TILE_SIZE = TILE_SIZE * TILE_SIZE * MAX_BIN_SIZE;
 
 __device__ uint32_t numProcessedTriangles;
 __device__ uint32_t veryLargeTriangleIndices[MAX_VERYLARGE_TRIANGLES];
@@ -44,8 +49,6 @@ constexpr uint32_t SPECTRAL[11] = {
 	RGBA(50, 136, 189), 
 	RGBA(94, 79, 162)
 };
-
-
 
 uint32_t sampleSpectral(float u){
 
@@ -302,16 +305,38 @@ void rasterizeLargeTriangles_block(
 	RenderTarget target
 ){
 	auto block = cg::this_thread_block();
+ //   bool flag = true;
+	//while (true)
+	//{
+	//	int ex = __syncthreads_and(flag); // ensure all threads are in sync before proceeding
+	//	if (ex) break;
+	//}
 
-	// mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
+	mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
 	mat4 transform = target.proj * target.view * geometry.transform;
 
-	__shared__ vec3 sh_positions[3 * TRIANGLES_PER_SWEEP];
+	__shared__ vec4 sh_positions[3 * TRIANGLES_PER_SWEEP];
 	__shared__ vec2 sh_uvs[3 * TRIANGLES_PER_SWEEP];
-
+     
+    // shared memory queues for binning and tiling 
+    // these are used to schedule work for the binning and tiling kernels 
+    __shared__ struct { int count; BinGroup  buf[TRIANGLES_PER_SWEEP];  } binGroups; 
+    __shared__ struct { int count; BinElement buf[MAX_BIN_SIZE]; } binElements;
+    __shared__ struct { int count; TileElement buf[MAX_TILE_SIZE]; } tileElements;
+    __shared__ int binGlobalOffset;
+    __shared__ int overflowFlagBins;
+    
 	int numTrianglesInBlock = min(int(geometry.count) - triangleOffset, TRIANGLES_PER_SWEEP);
 
 	if(numTrianglesInBlock <= 0) return;
+     
+    if (block.thread_rank() == 0) 
+    {
+        // reset bin queue  
+        binGroups.count = binElements.count = tileElements.count = 0;
+        binGlobalOffset = 0;
+        overflowFlagBins = 0;
+    }
 
 	// load triangles into shared memory
 	for(
@@ -320,9 +345,14 @@ void rasterizeLargeTriangles_block(
 		i += block.size()
 	){
 		int triangleIndex = triangleOffset + i;
-		sh_positions[3 * i + 0] = geometry.position[3 * triangleIndex + 0];
-		sh_positions[3 * i + 1] = geometry.position[3 * triangleIndex + 1];
-		sh_positions[3 * i + 2] = geometry.position[3 * triangleIndex + 2];
+		sh_positions[3 * i + 0] = vec4(geometry.position[3 * triangleIndex + 0], 1.0f); 
+		sh_positions[3 * i + 1] = vec4(geometry.position[3 * triangleIndex + 1], 1.0f); 
+		sh_positions[3 * i + 2] = vec4(geometry.position[3 * triangleIndex + 2], 1.0f); 
+        
+        // store screen space positions in shared mem since they're being reused later
+        sh_positions[3 * i + 0] = toScreenCoord((vec3)sh_positions[3 * i + 0], transform, target.width, target.height); 
+		sh_positions[3 * i + 1] = toScreenCoord((vec3)sh_positions[3 * i + 1], transform, target.width, target.height); 
+		sh_positions[3 * i + 2] = toScreenCoord((vec3)sh_positions[3 * i + 2], transform, target.width, target.height); 
 
 		sh_uvs[3 * i + 0] = geometry.uv[3 * triangleIndex + 0];
 		sh_uvs[3 * i + 1] = geometry.uv[3 * triangleIndex + 1];
@@ -339,13 +369,9 @@ void rasterizeLargeTriangles_block(
 	){
 		int triangleIndex = triangleOffset + i;
 		
-		vec3 v_0 = sh_positions[3 * i + 0];
-		vec3 v_1 = sh_positions[3 * i + 1];
-		vec3 v_2 = sh_positions[3 * i + 2];
-
-		vec4 p_0 = toScreenCoord(v_0, transform, target.width, target.height);
-		vec4 p_1 = toScreenCoord(v_1, transform, target.width, target.height);
-		vec4 p_2 = toScreenCoord(v_2, transform, target.width, target.height);
+        vec4 p_0 = sh_positions[3 * i + 0]; 
+        vec4 p_1 = sh_positions[3 * i + 1]; 
+        vec4 p_2 = sh_positions[3 * i + 2]; 
 
 		if(p_0.w < 0.0f || p_1.w < 0.0f || p_2.w < 0.0f) continue;
 
@@ -375,69 +401,270 @@ void rasterizeLargeTriangles_block(
 		int size_y = ceil(max_y) - floor(min_y);
 		int numFragments = size_x * size_y;
 
-		// if(numFragments > 40'000){
-		// 	// uint32_t index = atomicAdd(&veryLargeTriangleCounter, 1);
-		// 	// veryLargeTriangleIndices[index] = triangleIndex;
-		// 	continue;
-		// }else if(numFragments > 4024){
-		// 	// TODO: schedule block-wise rasterization
-		// 	// uint32_t index = atomicAdd(&largeTriangleSchedule.numTriangles, 1);
-		// 	// largeTriangleSchedule.indices[index] = triangleIndex;
-		// 	continue;
-		// }
         if (numFragments <= 4024) continue;
-
-		int numProcessedSamples = 0;
-		for(int fragOffset = 0; fragOffset < numFragments; fragOffset += 1){
-
-			// safety mechanism: don't draw more than <x> pixels per thread
-			// if(numProcessedSamples > 4000) break;
-
-			int fragID = fragOffset; // + block.thread_rank();
-			int fragX = fragID % size_x;
-			int fragY = fragID / size_x;
-
-			vec2 pFrag = {
-				floor(min_x) + float(fragX), 
-				floor(min_y) + float(fragY)
-			};
-			vec2 sample = {pFrag.x - p_0.x, pFrag.y - p_0.y};
-
-			// v: vertex[0], s: vertex[1], t: vertex[2]
-			float s = cross(sample, v_02) / cross(v_01, v_02);
-			float t = cross(v_01, sample) / cross(v_01, v_02);
-			float v = 1.0f - (s + t);
-
-			int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
-			int pixelID = pixelCoords.x + pixelCoords.y * target.width;
-			pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
-
-			bool isInsideTriangle = (s >= 0.0f) && (t >= 0.0f) && (v >= 0.0f);
-
-			if(isInsideTriangle){
-				uint32_t color = computeColor(triangleIndex, geometry, material, material.texture, s, t, v);
-				uint8_t* rgb = (uint8_t*)&color;
-
-				// color = sampleSpectral(float(2 * triangleIndex) / float(geometry.count));
-				// color = sampleSpectral(floor(11.0f * float(2 * triangleIndex) / float(geometry.count)) / 11.0f);
-
-				float depth = v * p_0.w + s * p_1.w + t * p_2.w;
-				uint64_t udepth = *((uint32_t*)&depth);
-				uint64_t pixel = (udepth << 32ull) | color;
-
-				atomicMin(&target.framebuffer[pixelID], pixel);
-			}
-			
-
-			numProcessedSamples++;
-		}
+        else // large triangles between 4024 and 40000 fragments^2
+        {
+            // take a grid of bins that covers the triangle Bounding Box
+            // each bin is of size BIN_SIZE x BIN_SIZE pixels
+            // bins are stored in binGroups - a grid of Height x Width bins
+            int bx0 = int(min_x) / BIN_SIZE; 
+            int by0 = int(min_y) / BIN_SIZE; 
+            int bx1 = int(max_x) / BIN_SIZE; 
+            int by1 = int(max_y) / BIN_SIZE; 
+ 
+            // update bin queue 
+            uint32_t slot = atomicAdd(&binGroups.count, 1); 
+            binGroups.buf[slot] = { (uint32_t)triangleIndex, 
+                            (uint16_t)bx0, (uint16_t)by0, 
+                            uint8_t(bx1 - bx0 + 1), 
+                            uint8_t(by1 - by0 + 1) };
+        }
 	}
 
-	block.sync();
+	block.sync(); // wait for bin groups to be fully populated
 
-	
+    // Large Triangles Hierarchical Rasterization
+
+    // prefix sum on binGroups so that each bin can be processed by a single thread
+    // needed for bin processing later
+    __shared__ int binPrefixSum[TRIANGLES_PER_SWEEP];
+    int exclusiveOffset = 0;
+    prefixSum(binGroups.buf, binGroups.count, binPrefixSum, exclusiveOffset);
+    int numOfBins = binGroups.count == 0 ? 0 : binPrefixSum[binGroups.count - 1];
+
+    // // convert to inclusive prefix sum
+    if(block.thread_rank() < binGroups.count)
+       binPrefixSum[block.thread_rank()] = exclusiveOffset;
+
+    block.sync(); // synchronize threads to ensure all prefix sums are computed
+
+    bool threadIsDone = false; // thread local flag to indicate if the thread is done processing bins
+    while (true) // loop until all bins have been processed
+    {   
+        // STAGE 1 - Bin Groups -> Bin Elements
+        // each bin element will contain the triangle index, bin coordinates, and a tile coverage mask  
+        // now each thread will process one bin and for each bin, we will compute the tile mask
+        for(int i = block.thread_rank() + binGlobalOffset; i < numOfBins; i += block.size())
+        {
+            constexpr int TILE_COUNT = BIN_SIZE / TILE_SIZE;
+            int binGroupIndex = find_bin_group_idx(i, binPrefixSum, binGroups.count);
+            int localBinIndex = i - binPrefixSum[binGroupIndex];
+
+            const BinGroup bg = binGroups.buf[binGroupIndex]; // 4‑byte read
+            int   binW   = int(bg.binW); // promote to int once
+
+            // bin coordinates inside group's rectangle
+            int binXoffset = localBinIndex % binW;
+            int binYoffset = localBinIndex / binW;
+            
+			int binPixX = (bg.binX + binXoffset) * BIN_SIZE;
+            int binPixY = (bg.binY + binYoffset) * BIN_SIZE;
+
+            constexpr uint32_t kDebugRed = 0xFFFF0000u;
+
+            
+            const vec4* tri = &sh_positions[3 * (bg.triangleIndex - triangleOffset)];
+            vec3 A, B, C;
+            tri_edge_coeffs(tri, A, B, C);
+            
+            // conservative rectangle test
+            // if (rect_outside_tri(A, B, C, binPixX, binPixY, BIN_SIZE, BIN_SIZE)) continue;
+            
+            uint64_t mask = 0ull; 
+            for (int ty = 0; ty < TILE_COUNT; ++ty) {
+                mask |= uint64_t(row_span_mask(A, B, C, binPixX, binPixY, ty)) << (ty * 8);
+            }
+            if (mask == 0ull) continue; 
+            
+            uint32_t slot = atomicAdd(&binElements.count, 1);
+			if ((slot + 1) >= MAX_BIN_SIZE) // if we run out of space in the binElements buffer, we stop processing
+            {
+               // claim the overflow flag
+               int old = atomicCAS(&overflowFlagBins, 0, 1);
+               if (old == 0) { // whoever set overflowFlag to 1 first will increase the global offset
+                   atomicAdd(&binGlobalOffset, MAX_BIN_SIZE); // increase global offset for bins by MAX_BIN_SIZE
+               }
+               break; // stop processing bins
+            }
+            
+            binElements.buf[slot] = { 
+                bg.triangleIndex, 
+                uint16_t(bg.binX + binXoffset), 
+                uint16_t(bg.binY + binYoffset), 
+                mask };
+            assert((bg.triangleIndex - triangleOffset) >= 0 && (bg.triangleIndex - triangleOffset) < 32);    
+            // for (int ty = 0; ty < TILE_COUNT; ++ty) 
+            // {   
+            //     uint8_t rowMask = uint8_t(mask >> (ty * 8));     // byte for this row
+            //     if (rowMask == 0) continue;                      // nothing in this row
+
+            //     for (int tx = 0; tx < TILE_COUNT; ++tx) {
+            //         if ((rowMask & (1u << tx)) == 0) continue;   // tile not covered
+
+            //         // --- pixel span of this tile --------------------------------
+            //         int tilePixX0 = binPixX + tx * TILE_SIZE;
+            //         int tilePixY0 = binPixY + ty * TILE_SIZE;
+
+            //         for (int py = tilePixY0; py < tilePixY0 + TILE_SIZE; ++py) {
+            //             if (py >= target.height) break;          // clip bottom
+
+            //             for (int px = tilePixX0; px < tilePixX0 + TILE_SIZE; ++px) {
+            //                 if (px >= target.width) break;       // clip right
+            //                 int pixelID = px + py * target.width;
+            //                 target.framebuffer[pixelID] = kDebugRed;
+            //             }
+            //         }
+            //     }
+            // }            
+
+        }
+        block.sync();
+        int numOfMasks = min(binElements.count, MAX_BIN_SIZE);
+        
+        threadIsDone = numOfMasks < MAX_BIN_SIZE; // if the number of masks is less than MAX_BIN_SIZE, we are done processing bins
+
+        // STAGE 2 - Bin Elements -> Tile Elements
+        // each tile element will contain the triangle index and the tile coordinates in pixel units
+
+        constexpr uint32_t lanesPerMask = TILE_SIZE * TILE_SIZE;
+        const uint32_t warpLane     = block.thread_rank() & 31;   // 0..31
+        const uint32_t masksPerBlock = block.size() / lanesPerMask;
+        
+        for (uint32_t maskIdx = 0; maskIdx < numOfMasks; maskIdx += masksPerBlock)
+        {
+            BinElement tm;
+            if (warpLane == 0) tm = binElements.buf[maskIdx];   // lane 0 loads
+            tm.triangleIndex = __shfl_sync(0xffffffffu, tm.triangleIndex, 0);
+            tm.binX          = __shfl_sync(0xffffffffu, tm.binX, 0);
+            tm.binY          = __shfl_sync(0xffffffffu, tm.binY, 0);
+            uint64_t mask64  = __shfl_sync(0xffffffffu, tm.mask, 0);
+
+            // compute the tile mask for this warp lane
+            // each mask is 64 bits wide, so split between to warps, 1 bit per thread
+            uint32_t warpId     = (block.thread_rank() >> 5) & 1;     // 0 or 1  (>> 5 == /32)
+            uint32_t slice  = (warpId == 0) ? uint32_t(mask64      & 0xffffffffu)
+                                            : uint32_t(mask64 >> 32);
+            uint32_t myBit  = slice & (1u << (warpLane));
+            if (!myBit) continue;                // this lane’s bit is 0 - nothing to do
+
+            // compute the tile coordinates inside the bin
+            int bitGlobal = warpLane + warpId * 32;
+            int tileX      =  (tm.binX * TILES_PER_BIN + (bitGlobal & 7)) * TILE_SIZE; // pixel coordinates
+            int tileY      =  (tm.binY * TILES_PER_BIN + (bitGlobal >> 3)) * TILE_SIZE;
+
+            uint32_t slot = atomicAdd(&tileElements.count, 1);
+            tileElements.buf[slot] = {
+                tm.triangleIndex,
+                uint16_t(tileX),
+                uint16_t(tileY)
+            };
+            // tileElements.buf[slot] = {block.thread_rank(), 0, 0};
+            assert((tm.triangleIndex - triangleOffset) >= 0 && (tm.triangleIndex - triangleOffset) < 32);
+            // constexpr uint32_t kDebugRed = 0x05FF00FFu;
+
+            // for (int dy = 0; dy < TILE_SIZE; ++dy) {
+            //    int py = tileY + dy;
+            //    if (py >= target.height) continue;   // clip bottom
+
+            //    for (int dx = 0; dx < TILE_SIZE; ++dx) {
+            //        int px = tileX + dx;
+            //        if (px >= target.width) continue; // clip right
+
+            //        int pixelID = px + py * target.width;
+            //        // No depth test for a pure colour debug fill.
+            //        target.framebuffer[pixelID] = kDebugRed;
+            //    }
+            // }
+        }
+
+        block.sync();
+
+        // STAGE 3 - Tile Elements -> Framebuffer
+        // each tile element will be processed by a single thread, and it will rasterize the tile
+        // coverage tests performed - now at fragment/pixel level to shade the triangles
+        
+        int numOfTiles = tileElements.count;
+        
+        for (uint32_t i = block.thread_rank(); i < numOfTiles; i+= block.size()) 
+        {
+            using bool3 = glm::bvec3;
+            using float3 = glm::vec3;
+			
+            TileElement te = tileElements.buf[i];
+            int tileX = te.binX;
+            int tileY = te.binY;
+
+            // compute the screen-space bounding rectangle of the tile
+            float min_y = (float)tileY;
+            float max_y = min_y + TILE_SIZE;
+
+            // clamp to screen
+            min_y = clamp(min_y, 0.0f, (float)target.height);
+            max_y = clamp(max_y, 0.0f, (float)target.height);
+            
+            const vec4* tri = &sh_positions[3 * (te.triangleIndex - triangleOffset)];
+            vec3 A, B, C;
+            tri_edge_coeffs(tri, A, B, C);
+            
+            vec2 e0 = { tri[1].x - tri[0].x, tri[1].y - tri[0].y };
+            vec2 e1 = { tri[2].x - tri[0].x, tri[2].y - tri[0].y };
+            float invArea = 1.0f / (e0.x * e1.y - e0.y * e1.x);
+
+            for(int y = min_y; y < max_y; y++)
+            {
+                float3 CY = B * float(y) + C;
+                bool3 horiz = glm::equal(A, float3(0.0f));
+                bool3 outsideH = bool3( horiz.x && (CY.x < 0.0f), horiz.y && (CY.y < 0.0f), horiz.z && (CY.z < 0.0f));
+
+                if (glm::any(outsideH)) continue; // skip rows outside the triangle
+                
+                float3 cross = - (CY / A);
+                bool3 pos = glm::greaterThan(A, float3(0.0f));
+                bool3 neg = glm::lessThan(A, float3(0.0f));
+
+                float lower = glm::compMax( glm::mix(float3(-FLT_MAX), cross, pos));
+                float upper = glm::compMin( glm::mix(float3( FLT_MAX), cross, neg));
+                if( lower > upper) continue; // skip rows outside the triangle
+
+                int ix0 = int(ceilf(lower));
+                int ix1 = int(floorf(upper));
+
+                for(int x = ix0; x < ix1; x++)
+                {
+                    vec2 pFrag = {float(x), float(y)};
+                    vec2 sample = {pFrag.x - tri[0].x, pFrag.y - tri[0].y};
+
+                    float s = (sample.x * e1.y - sample.y * e1.x) * invArea;
+                    float t = (e0.x * sample.y - e0.y * sample.x) * invArea;
+                    float v = 1.0f - s - t;
+
+                    // if (s < 0.0f || t < 0.0f || v < 0.0f) continue; // skip pixels outside the triangle
+                    uint32_t color = computeColor(te.triangleIndex, geometry, material, material.texture, s, t, v);
+                    uint8_t* rgb = (uint8_t*)&color;
+
+                    int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
+                    int pixelID = pixelCoords.x + pixelCoords.y * target.width;
+                    pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
+
+                    float depth = v * tri[0].w + s * tri[1].w + t * tri[2].w;
+                    uint64_t udepth = *((uint32_t*)&depth);
+                    uint64_t pixel = (udepth << 32ull) | color;
+
+                    atomicMin(&target.framebuffer[pixelID], pixel);
+                }
+            }
+        }
+
+        if(syncthreads_and((int)threadIsDone)) break; // if all blocks are done, exit the loop
+
+        if(block.thread_rank() == 0){
+            overflowFlagBins = 0; // reset overflow flag for the next iteration
+            binElements.count = 0; // reset binElements buffer
+            tileElements.count = 0; // reset tileElements buffer
+        }
+    }
 }
-
+        
 
 
 void rasterizeTriangles_block(
