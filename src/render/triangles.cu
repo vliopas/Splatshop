@@ -629,6 +629,11 @@ void rasterizeLargeTriangles_block(
                 int ix0 = int(ceilf(lower));
                 int ix1 = int(floorf(upper));
 
+                if (ix1 < 0 || ix0 >= int(target.width)) continue; // completely outside the screen
+
+                ix0 = clamp(ix0, 0, int(target.width) - 1); // clamp partially‑visible rows
+                ix1 = clamp(ix1, 0, int(target.width) - 1);
+
                 for(int x = ix0; x < ix1; x++)
                 {
                     vec2 pFrag = {float(x), float(y)};
