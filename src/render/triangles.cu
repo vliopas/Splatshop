@@ -305,12 +305,6 @@ void rasterizeLargeTriangles_block(
 	RenderTarget target
 ){
 	auto block = cg::this_thread_block();
- //   bool flag = true;
-	//while (true)
-	//{
-	//	int ex = __syncthreads_and(flag); // ensure all threads are in sync before proceeding
-	//	if (ex) break;
-	//}
 
 	mat4 rot = glm::rotate(3.1415f * 0.5f, vec3{0.0f, 1.0f, 0.0f});
 	mat4 transform = target.proj * target.view * geometry.transform;
@@ -320,6 +314,7 @@ void rasterizeLargeTriangles_block(
      
     // shared memory queues for binning and tiling 
     // these are used to schedule work for the binning and tiling kernels 
+    __shared__ int binPrefixSum[TRIANGLES_PER_SWEEP];
     __shared__ struct { int count; BinGroup  buf[TRIANGLES_PER_SWEEP];  } binGroups; 
     __shared__ struct { int count; BinElement buf[MAX_BIN_SIZE]; } binElements;
     __shared__ struct { int count; TileElement buf[MAX_TILE_SIZE]; } tileElements;
@@ -414,7 +409,7 @@ void rasterizeLargeTriangles_block(
  
             // update bin queue 
             uint32_t slot = atomicAdd(&binGroups.count, 1); 
-            binGroups.buf[slot] = { (uint32_t)triangleIndex, 
+            binGroups.buf[slot] = { (uint16_t)i, 
                             (uint16_t)bx0, (uint16_t)by0, 
                             uint8_t(bx1 - bx0 + 1), 
                             uint8_t(by1 - by0 + 1) };
@@ -423,22 +418,21 @@ void rasterizeLargeTriangles_block(
 
 	block.sync(); // wait for bin groups to be fully populated
 
-    // Large Triangles Hierarchical Rasterization
-
     // prefix sum on binGroups so that each bin can be processed by a single thread
     // needed for bin processing later
-    __shared__ int binPrefixSum[TRIANGLES_PER_SWEEP];
     int exclusiveOffset = 0;
-    prefixSum(binGroups.buf, binGroups.count, binPrefixSum, exclusiveOffset);
-    int numOfBins = binGroups.count == 0 ? 0 : binPrefixSum[binGroups.count - 1];
+    prefixSumSmall(binGroups.buf, binGroups.count, binPrefixSum, exclusiveOffset);
 
-    // // convert to inclusive prefix sum
+    // convert to inclusive prefix sum
     if(block.thread_rank() < binGroups.count)
        binPrefixSum[block.thread_rank()] = exclusiveOffset;
 
     block.sync(); // synchronize threads to ensure all prefix sums are computed
-
+    
+    int numOfBins = binGroups.count == 0 ? 0 : 
+    binPrefixSum[binGroups.count - 1] + binGroups.buf[binGroups.count -1].binH * binGroups.buf[binGroups.count -1].binW; // sum from exclusive prefix sum
     bool threadIsDone = false; // thread local flag to indicate if the thread is done processing bins
+
     while (true) // loop until all bins have been processed
     {   
         // STAGE 1 - Bin Groups -> Bin Elements
@@ -446,7 +440,6 @@ void rasterizeLargeTriangles_block(
         // now each thread will process one bin and for each bin, we will compute the tile mask
         for(int i = block.thread_rank() + binGlobalOffset; i < numOfBins; i += block.size())
         {
-            constexpr int TILE_COUNT = BIN_SIZE / TILE_SIZE;
             int binGroupIndex = find_bin_group_idx(i, binPrefixSum, binGroups.count);
             int localBinIndex = i - binPrefixSum[binGroupIndex];
 
@@ -460,10 +453,7 @@ void rasterizeLargeTriangles_block(
 			int binPixX = (bg.binX + binXoffset) * BIN_SIZE;
             int binPixY = (bg.binY + binYoffset) * BIN_SIZE;
 
-            constexpr uint32_t kDebugRed = 0xFFFF0000u;
-
-            
-            const vec4* tri = &sh_positions[3 * (bg.triangleIndex - triangleOffset)];
+            const vec4* tri = &sh_positions[3 * bg.triangleIndex];
             vec3 A, B, C;
             tri_edge_coeffs(tri, A, B, C);
             
@@ -471,7 +461,7 @@ void rasterizeLargeTriangles_block(
             // if (rect_outside_tri(A, B, C, binPixX, binPixY, BIN_SIZE, BIN_SIZE)) continue;
             
             uint64_t mask = 0ull; 
-            for (int ty = 0; ty < TILE_COUNT; ++ty) {
+            for (int ty = 0; ty < TILES_PER_BIN; ++ty) {
                 mask |= uint64_t(row_span_mask(A, B, C, binPixX, binPixY, ty)) << (ty * 8);
             }
             if (mask == 0ull) continue; 
@@ -487,38 +477,15 @@ void rasterizeLargeTriangles_block(
                break; // stop processing bins
             }
             
-            binElements.buf[slot] = { 
-                bg.triangleIndex, 
-                uint16_t(bg.binX + binXoffset), 
-                uint16_t(bg.binY + binYoffset), 
-                mask };
-            assert((bg.triangleIndex - triangleOffset) >= 0 && (bg.triangleIndex - triangleOffset) < 32);    
-            // for (int ty = 0; ty < TILE_COUNT; ++ty) 
-            // {   
-            //     uint8_t rowMask = uint8_t(mask >> (ty * 8));     // byte for this row
-            //     if (rowMask == 0) continue;                      // nothing in this row
-
-            //     for (int tx = 0; tx < TILE_COUNT; ++tx) {
-            //         if ((rowMask & (1u << tx)) == 0) continue;   // tile not covered
-
-            //         // --- pixel span of this tile --------------------------------
-            //         int tilePixX0 = binPixX + tx * TILE_SIZE;
-            //         int tilePixY0 = binPixY + ty * TILE_SIZE;
-
-            //         for (int py = tilePixY0; py < tilePixY0 + TILE_SIZE; ++py) {
-            //             if (py >= target.height) break;          // clip bottom
-
-            //             for (int px = tilePixX0; px < tilePixX0 + TILE_SIZE; ++px) {
-            //                 if (px >= target.width) break;       // clip right
-            //                 int pixelID = px + py * target.width;
-            //                 target.framebuffer[pixelID] = kDebugRed;
-            //             }
-            //         }
-            //     }
-            // }            
-
+            BinElement dst;
+            dst.pack(uint8_t(bg.triangleIndex),
+                    uint16_t(bg.binX + binXoffset),
+                    uint16_t(bg.binY + binYoffset) );
+            dst.setMask(mask);
+            binElements.buf[slot] = dst;            
         }
         block.sync();
+
         int numOfMasks = min(binElements.count, MAX_BIN_SIZE);
         
         threadIsDone = numOfMasks < MAX_BIN_SIZE; // if the number of masks is less than MAX_BIN_SIZE, we are done processing bins
@@ -527,54 +494,34 @@ void rasterizeLargeTriangles_block(
         // each tile element will contain the triangle index and the tile coordinates in pixel units
 
         constexpr uint32_t lanesPerMask = TILE_SIZE * TILE_SIZE;
+        const uint32_t warpId     = (block.thread_rank() >> 5) & 1;
         const uint32_t warpLane     = block.thread_rank() & 31;   // 0..31
         const uint32_t masksPerBlock = block.size() / lanesPerMask;
         
         for (uint32_t maskIdx = 0; maskIdx < numOfMasks; maskIdx += masksPerBlock)
         {
             BinElement tm;
-            if (warpLane == 0) tm = binElements.buf[maskIdx];   // lane 0 loads
-            tm.triangleIndex = __shfl_sync(0xffffffffu, tm.triangleIndex, 0);
-            tm.binX          = __shfl_sync(0xffffffffu, tm.binX, 0);
-            tm.binY          = __shfl_sync(0xffffffffu, tm.binY, 0);
-            uint64_t mask64  = __shfl_sync(0xffffffffu, tm.mask, 0);
 
-            // compute the tile mask for this warp lane
-            // each mask is 64 bits wide, so split between to warps, 1 bit per thread
-            uint32_t warpId     = (block.thread_rank() >> 5) & 1;     // 0 or 1  (>> 5 == /32)
-            uint32_t slice  = (warpId == 0) ? uint32_t(mask64      & 0xffffffffu)
-                                            : uint32_t(mask64 >> 32);
-            uint32_t myBit  = slice & (1u << (warpLane));
+            if (warpLane == 0) tm = binElements.buf[maskIdx];
+            
+            tm.triBinPacked = __shfl_sync(0xFFFFFFFFu, tm.triBinPacked, 0);
+            tm.maskHi = __shfl_sync(0xFFFFFFFFu, tm.maskHi, 0);
+            tm.maskLo = __shfl_sync(0xFFFFFFFFu, tm.maskLo, 0);
+            
+            uint8_t  triId =  tm.getTriangleIndex();
+            uint16_t binX  =  tm.getBinX();
+            uint16_t binY  =  tm.getBinY();
+            uint32_t slice32 = ((warpId == 0) ? tm.maskLo : tm.maskHi);
+            uint32_t myBit = slice32 & (1u << warpLane);
             if (!myBit) continue;                // this lane’s bit is 0 - nothing to do
 
             // compute the tile coordinates inside the bin
             int bitGlobal = warpLane + warpId * 32;
-            int tileX      =  (tm.binX * TILES_PER_BIN + (bitGlobal & 7)) * TILE_SIZE; // pixel coordinates
-            int tileY      =  (tm.binY * TILES_PER_BIN + (bitGlobal >> 3)) * TILE_SIZE;
+            int tileX = (binX * TILES_PER_BIN + (bitGlobal & 7)) * TILE_SIZE; // pixel coordinates
+            int tileY = (binY * TILES_PER_BIN + (bitGlobal >> 3)) * TILE_SIZE;
 
             uint32_t slot = atomicAdd(&tileElements.count, 1);
-            tileElements.buf[slot] = {
-                tm.triangleIndex,
-                uint16_t(tileX),
-                uint16_t(tileY)
-            };
-            // tileElements.buf[slot] = {block.thread_rank(), 0, 0};
-            assert((tm.triangleIndex - triangleOffset) >= 0 && (tm.triangleIndex - triangleOffset) < 32);
-            // constexpr uint32_t kDebugRed = 0x05FF00FFu;
-
-            // for (int dy = 0; dy < TILE_SIZE; ++dy) {
-            //    int py = tileY + dy;
-            //    if (py >= target.height) continue;   // clip bottom
-
-            //    for (int dx = 0; dx < TILE_SIZE; ++dx) {
-            //        int px = tileX + dx;
-            //        if (px >= target.width) continue; // clip right
-
-            //        int pixelID = px + py * target.width;
-            //        // No depth test for a pure colour debug fill.
-            //        target.framebuffer[pixelID] = kDebugRed;
-            //    }
-            // }
+            tileElements.buf[slot] = { uint16_t(triId), uint16_t(tileX), uint16_t(tileY) };
         }
 
         block.sync();
@@ -602,7 +549,7 @@ void rasterizeLargeTriangles_block(
             min_y = clamp(min_y, 0.0f, (float)target.height);
             max_y = clamp(max_y, 0.0f, (float)target.height);
             
-            const vec4* tri = &sh_positions[3 * (te.triangleIndex - triangleOffset)];
+            const vec4* tri = &sh_positions[3 * te.triangleIndex];
             vec3 A, B, C;
             tri_edge_coeffs(tri, A, B, C);
             
@@ -644,7 +591,7 @@ void rasterizeLargeTriangles_block(
                     float v = 1.0f - s - t;
 
                     // if (s < 0.0f || t < 0.0f || v < 0.0f) continue; // skip pixels outside the triangle
-                    uint32_t color = computeColor(te.triangleIndex, geometry, material, material.texture, s, t, v);
+                    uint32_t color = computeColor(te.triangleIndex + triangleOffset, geometry, material, material.texture, s, t, v);
                     uint8_t* rgb = (uint8_t*)&color;
 
                     int2 pixelCoords = make_int2(pFrag.x, pFrag.y);

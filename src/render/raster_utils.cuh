@@ -14,21 +14,39 @@ constexpr int TILES_PER_BIN = BIN_SIZE / TILE_SIZE;
  
 // fixed-size work records 
 struct BinGroup  { 
-    uint32_t triangleIndex;    // triangle ID 
+    uint16_t triangleIndex;    // local triangle ID 
     uint16_t binX, binY;       // top-left bin (in BIN_SIZE units) 
     uint8_t  binW, binH;       // width & height in bins 
 }; 
  
-struct BinElement 
-{ 
-    uint32_t triangleIndex;    // triangle ID 
-    uint16_t binX, binY;       // top-left bin (in BIN_SIZE units) 
-    uint64_t mask;             // tile coverage mask 
+struct BinElement // packed data to 4-byte alignment
+{
+    uint32_t triBinPacked; // packed: [local triangle ID(8 bits) | binX(12 bits) | binY(12 bits)]
+    uint32_t maskLo; // lower 32 bits of mask
+    uint32_t maskHi; // upper 32 bits of mask
+
+    __host__ __device__ inline void pack(uint8_t triangleIndex, uint16_t binX, uint16_t binY)
+    {
+        triBinPacked = ((uint32_t)(triangleIndex & 0xFF) << 24) 
+                     | ((uint32_t)(binX & 0xFFF) << 12) 
+                     | (binY & 0xFFF);
+    }
+
+    __host__ __device__ inline uint8_t getTriangleIndex() const { return (triBinPacked >> 24) & 0xFF; }
+    __host__ __device__ inline uint16_t getBinX() const { return (triBinPacked >> 12) & 0xFFF; }
+    __host__ __device__ inline uint16_t getBinY() const { return triBinPacked & 0xFFF; }
+    __host__ __device__ inline uint64_t getMask() const { return ((uint64_t)maskHi << 32) | (uint64_t)maskLo; }
+
+    __host__ __device__ inline void setMask(uint64_t mask)
+    {
+        maskLo = (uint32_t)(mask & 0xFFFFFFFF);
+        maskHi = (uint32_t)(mask >> 32);
+    }
 };
 
 struct TileElement 
 { 
-    uint32_t triangleIndex;    // triangle ID 
+    uint16_t triangleIndex;    // local triangle ID 
     uint16_t binX, binY;       // top-left bin (in pixel units) 
 };
 
@@ -36,7 +54,7 @@ void prefixSum(
     const BinGroup *input_array, 
     int size, // it must hold that size <= block.size()
     int *prefixSum, // output array
-    int&  inclusiveOffset // inclusive prefix sum offset for this thread [output parameter]
+    int&  exclusiveOffset // exclusive prefix sum offset for this thread [output parameter]
 )
 {
     auto block = cg::this_thread_block();
@@ -50,7 +68,7 @@ void prefixSum(
     for (int stride = 1; stride < size; stride *= 2)
     {
         int val = 0;
-        if (tid >= stride  && tid < size)
+        if (tid >= stride && tid < size)
             val = prefixSum[tid - stride];
         block.sync();
         if (tid < size)
@@ -60,7 +78,36 @@ void prefixSum(
 
     // Compute exclusive prefix sum offset for this thread
     if (tid < size)
-        inclusiveOffset = (tid == 0) ? 0 : prefixSum[tid - 1];
+        exclusiveOffset = (tid == 0) ? 0 : prefixSum[tid - 1];
+}
+
+__device__ void prefixSumSmall(
+        const BinGroup* input_array,
+        int  size,
+        int* prefixSum,
+        int& exclusiveOffset)            // output per thread (same for all)
+{
+    auto block = cg::this_thread_block();
+
+    /* ---- Let exactly one thread do the whole job ------------------------ */
+    if (block.thread_rank() == 0)
+    {
+        int running = 0;
+        for (int i = 0; i < size; ++i)
+        {
+            running += input_array[i].binH * input_array[i].binW;
+            prefixSum[i] = running;                // inclusive so far
+        }
+    }
+
+    block.sync();                                  // make data visible
+
+    /* ---- Convert to per‑thread exclusive offset ------------------------- */
+    if (block.thread_rank() < size)
+        exclusiveOffset = (block.thread_rank() == 0)
+                          ? 0
+                          : prefixSum[block.thread_rank() - 1];
+    block.sync();
 }
 
 // conservative rectangle test  
