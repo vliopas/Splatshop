@@ -32,7 +32,7 @@ void initSorting(){
 	static bool initialized = false;
 
 	if(!initialized){
-		prog_radix = new CudaModularProgram({"./src/GPUSorting/RadixSort.cu"});
+		prog_radix = new CudaModularProgram({string(PROJECT_ROOT_DIR)+"/src/GPUSorting/RadixSort.cu" });
 
 		initialized = true;
 	}

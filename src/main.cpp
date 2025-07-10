@@ -267,7 +267,7 @@ int main(){
 
 	{ // load some textures
 		int n;
-		string imgPath = "./resources/images/symbols.png";
+		string imgPath = fs::path(PROJECT_ROOT_DIR).string() + "/resources/images/symbols.png";
 		uint8_t* data = stbi_load(imgPath.c_str(), &Runtime::gltex_symbols_width, &Runtime::gltex_symbols_height, &n, 4);
 
 		int numPixels = Runtime::gltex_symbols_width * Runtime::gltex_symbols_height;
@@ -293,7 +293,7 @@ int main(){
 
 	{ // load some textures
 		int n;
-		string imgPath = "./resources/images/symbols_32x32.png";
+		string imgPath = fs::path(PROJECT_ROOT_DIR).string() + "/resources/images/symbols_32x32.png";
 		uint8_t* data = stbi_load(imgPath.c_str(), &Runtime::gltex_symbols_32x32_width, &Runtime::gltex_symbols_32x32_height, &n, 4);
 
 		int numPixels = Runtime::gltex_symbols_32x32_width * Runtime::gltex_symbols_32x32_height;

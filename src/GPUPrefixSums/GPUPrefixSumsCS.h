@@ -63,7 +63,7 @@ namespace GPUPrefixSumsCS{
 		static bool initialized = false;
 
 		if(!initialized){
-			prog = new CudaModularProgram({"./src/GPUPrefixSums/ChainedScanDecoupledLookback.cu"});
+			prog = new CudaModularProgram({string(PROJECT_ROOT_DIR) + "/src/GPUPrefixSums/ChainedScanDecoupledLookback.cu" });
 			initialized = true;
 		}
 	}

@@ -11,16 +11,16 @@ namespace std{
 #include <curand_kernel.h>
 #include <cooperative_groups.h>
 
-#include "./libs/glm/glm/glm.hpp"
-#include "./libs/glm/glm/gtc/matrix_transform.hpp"
-#include "./libs/glm/glm/gtc/matrix_access.hpp"
-#include "./libs/glm/glm/gtx/transform.hpp"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "libs/glm/glm/glm.hpp"
+#include "libs/glm/glm/gtc/matrix_transform.hpp"
+#include "libs/glm/glm/gtc/matrix_access.hpp"
+#include "libs/glm/glm/gtx/transform.hpp"
+#include "libs/glm/glm/gtc/quaternion.hpp"
 
-#include "../utils.cuh"
+#include "utils.cuh"
 
-#include "../HostDeviceInterface.h"
-#include "./../math.cuh"
+#include "HostDeviceInterface.h"
+#include "math.cuh"
 
 using glm::ivec2;
 

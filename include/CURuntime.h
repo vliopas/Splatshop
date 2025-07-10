@@ -13,7 +13,7 @@
 #include "glm/common.hpp"
 
 #include "MouseEvents.h"
-#include "./CudaVirtualMemory.h"
+#include "CudaVirtualMemory.h"
 
 #include "cuda.h"
 #include "cuda_runtime.h"

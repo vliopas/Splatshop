@@ -168,9 +168,9 @@ void SplatEditor::setup(){
 	SplatEditor* editor = SplatEditor::instance;
 
 	editor->font_default      = getFont(13);
-	editor->font_vr_title     = getFont("./resources/fonts/Carlito/Carlito-Bold.ttf", 50);
-	editor->font_vr_text      = getFont("./resources/fonts/Carlito/Carlito-Bold.ttf", 33);
-	editor->font_vr_smalltext = getFont("./resources/fonts/Carlito/Carlito-Bold.ttf", 24);
+	editor->font_vr_title     = getFont(fs::path(PROJECT_ROOT_DIR).string() + "/resources/fonts/Carlito/Carlito-Bold.ttf", 50);
+	editor->font_vr_text      = getFont(fs::path(PROJECT_ROOT_DIR).string() + "/resources/fonts/Carlito/Carlito-Bold.ttf", 33);
+	editor->font_vr_smalltext = getFont(fs::path(PROJECT_ROOT_DIR).string() + "/resources/fonts/Carlito/Carlito-Bold.ttf", 24);
 
 	editor->initCudaProgram();
 
@@ -1539,13 +1539,13 @@ void SplatEditor::initCudaProgram(){
 	CudaModularProgram* prog_dbg = nullptr;
 
 	vector<Program> programs = {
-		{&prog_gaussians_rendering,  "./src/gaussians_rendering.cu"},
-		{&prog_gaussians_editing,    "./src/gaussians_editing.cu"},
-		{&prog_points,               "./src/render/points.cu"},
-		{&prog_triangles,            "./src/render/triangles.cu"},
-		{&prog_lines,                "./src/render/lines.cu"},
-		{&prog_helpers,              "./src/render/helpers.cu"},
-		// {&prog_dbg,                  "./src/GPUSorting/RadixSort.cu"},
+		{&prog_gaussians_rendering,  fs::path(PROJECT_ROOT_DIR).string()  + "/src/gaussians_rendering.cu"},
+		{&prog_gaussians_editing,    fs::path(PROJECT_ROOT_DIR).string()  + "/src/gaussians_editing.cu"},
+		{&prog_points,               fs::path(PROJECT_ROOT_DIR).string()  + "/src/render/points.cu"},
+		{&prog_triangles,            fs::path(PROJECT_ROOT_DIR).string()  + "/src/render/triangles.cu"},
+		{&prog_lines,                fs::path(PROJECT_ROOT_DIR).string()  + "/src/render/lines.cu"},
+		{&prog_helpers,              fs::path(PROJECT_ROOT_DIR).string()  + "/src/render/helpers.cu"},
+		// {&prog_dbg,                  fs::path(PROJECT_ROOT_DIR).string()  + "/src/GPUSorting/RadixSort.cu"},
 	};
 
 	// single-threaded compilation
@@ -1553,7 +1553,7 @@ void SplatEditor::initCudaProgram(){
 		string filename = fs::path(program.path).filename().string();
 		string cubinPath = format("./cubins/{}.cubin", filename);
 
-		if(fs::exists(cubinPath)){
+		if(fs::exists(cubinPath)){__debugbreak();
 			auto buffer = readBinaryFile(cubinPath);
 			*program.ptr = CudaModularProgram::fromCubin(buffer->data, buffer->size);
 		}else{

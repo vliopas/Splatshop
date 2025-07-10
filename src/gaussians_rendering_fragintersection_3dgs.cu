@@ -22,8 +22,8 @@ using namespace std;
 
 #include <cuda_fp16.h>
 
-#include "./libs/glm/glm/glm.hpp"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "libs/glm/glm/glm.hpp"
+#include "libs/glm/glm/gtc/quaternion.hpp"
 
 #include "utils.cuh"
 #include "HostDeviceInterface.h"

@@ -16,12 +16,12 @@ using namespace std;
 
 #include <cuda_fp16.h>
 
-#include "./libs/glm/glm/glm.hpp"
+#include "libs/glm/glm/glm.hpp"
 
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
 #include "math.cuh"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "libs/glm/glm/gtc/quaternion.hpp"
 
 namespace cg = cooperative_groups;
 

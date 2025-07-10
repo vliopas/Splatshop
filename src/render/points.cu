@@ -11,18 +11,18 @@ namespace std{
 
 #include <curand_kernel.h>
 
-#include "./libs/glm/glm/glm.hpp"
-#include "./libs/glm/glm/gtc/matrix_transform.hpp"
-#include "./libs/glm/glm/gtc/matrix_access.hpp"
-#include "./libs/glm/glm/gtx/transform.hpp"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
+#include "libs/glm/glm/glm.hpp"
+#include "libs/glm/glm/gtc/matrix_transform.hpp"
+#include "libs/glm/glm/gtc/matrix_access.hpp"
+#include "libs/glm/glm/gtx/transform.hpp"
+#include "libs/glm/glm/gtc/quaternion.hpp"
 
-#include "../utils.cuh"
+#include "utils.cuh"
 
-// #include "./include/OrbitControls.h"
-// #include "./include/DesktopVRControls.h"
+// #include "include/OrbitControls.h"
+// #include "include/DesktopVRControls.h"
 
-#include "../HostDeviceInterface.h"
+#include "HostDeviceInterface.h"
 
 // from: https://developer.nvidia.com/blog/faster-parallel-reductions-kepler/
 __device__ __inline__ 

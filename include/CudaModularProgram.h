@@ -144,6 +144,9 @@ struct CudaModule{
 		string optInclude = std::format("-I {}", dir).c_str();
 		string cuda_include = std::format("-I {}/include", cuda_path);
 		string cudastd_include = std::format("-I {}/include/cuda/std", cuda_path);
+		string prj_root = std::format("-I {}", PROJECT_ROOT_DIR);
+		string src_folder = std::format("-I {}/src", PROJECT_ROOT_DIR);
+		string includes_folder = std::format("-I {}/include", PROJECT_ROOT_DIR);
 
 
 		CUdevice device;
@@ -175,8 +178,9 @@ struct CudaModule{
 			cudastd_include.c_str(),
 			cuda_include.c_str(),
 			optInclude.c_str(),
-			"-I ./",
-			"-I ./include",
+			prj_root.c_str(),
+			src_folder.c_str(),
+			includes_folder.c_str(),
 			"--relocatable-device-code=true",
 			"-default-device",                   // assume __device__ if not specified
 			"--dlink-time-opt",                  // link time optimization "-dlto", 

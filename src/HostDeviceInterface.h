@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "./MouseEvents.h"
+#include "MouseEvents.h"
 
 // #define QUATERNIONS_FLOAT
 // #define QUATERNIONS_HALF

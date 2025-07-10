@@ -14,12 +14,12 @@ namespace std{
 
 using namespace std;
 
-#include "./libs/glm/glm/glm.hpp"
-#include "./libs/glm/glm/gtc/matrix_transform.hpp"
-// #include "./libs/glm/glm/gtc/matrix_access.hpp"
-#include "./libs/glm/glm/gtx/transform.hpp"
-#include "./libs/glm/glm/gtc/quaternion.hpp"
-#include "./libs/glm/glm/gtx/matrix_decompose.hpp"
+#include "libs/glm/glm/glm.hpp"
+#include "libs/glm/glm/gtc/matrix_transform.hpp"
+// #include "libs/glm/glm/gtc/matrix_access.hpp"
+#include "libs/glm/glm/gtx/transform.hpp"
+#include "libs/glm/glm/gtc/quaternion.hpp"
+#include "libs/glm/glm/gtx/matrix_decompose.hpp"
 
 #include "utils.cuh"
 #include "HostDeviceInterface.h"
