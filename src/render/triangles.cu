@@ -531,11 +531,15 @@ void rasterizeLargeTriangles_block(
 
             // compute the screen-space bounding rectangle of the tile
             float min_y = (float)tileY;
+            float min_x = (float)tileX;
             float max_y = min_y + TILE_SIZE;
+            float max_x = min_x + TILE_SIZE;
 
             // clamp to screen
             min_y = clamp(min_y, 0.0f, (float)target.height);
             max_y = clamp(max_y, 0.0f, (float)target.height);
+            min_x = clamp(min_x, 0.0f, (float)target.width);
+            max_x = clamp(max_x, 0.0f, (float)target.width);
             
             const vec4* tri = &sh_positions[3 * te.triangleIndex];
             vec3 A, B, C;
@@ -566,8 +570,8 @@ void rasterizeLargeTriangles_block(
 
                 if (ix1 < 0 || ix0 >= int(target.width)) continue; // completely outside the screen
 
-                ix0 = clamp(ix0, 0, int(target.width) - 1); // clamp partially‑visible rows
-                ix1 = clamp(ix1, 0, int(target.width) - 1);
+                ix0 = clamp(ix0, (int)min_x, (int)max_x); // clamp within tile width
+                ix1 = clamp(ix1, (int)min_x, (int)max_x);
 
                 for(int x = ix0; x < ix1; x++)
                 {

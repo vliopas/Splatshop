@@ -170,41 +170,57 @@ __device__ __forceinline__ uint8_t row_span_mask(const vec3& A, const vec3& B, c
     using float3 = glm::vec3;
     using bool3 = glm::bvec3;
     
-    constexpr int TILE_COUNT = BIN_SIZE / TILE_SIZE;
-    
-    float sampleY = float(bin_y_pix + ty * TILE_SIZE + 0.5f * TILE_SIZE);
-    float3 CY = B * sampleY + C;
+    // sample Y at the top and bottom of the tile row
+    float y_top    = float(bin_y_pix + ty * TILE_SIZE);
+    float y_bottom = float(bin_y_pix + (ty + 1) * TILE_SIZE);
 
-    // horizontal‑edge cull: A == 0 && CY < 0 -> we are in negative half-space -> whole row outside
+    // compute CY at top and bottom sample lines
+    float3 CY_top    = B * y_top + C;
+    float3 CY_bottom = B * y_bottom + C;
+
+    // horizontal-edge cull for top and bottom sample lines
     bool3 horiz = glm::equal(A, float3(0.0f));
-    bool3 outsideH = bool3( horiz.x && (CY.x < 0.0f), horiz.y && (CY.y < 0.0f), horiz.z && (CY.z < 0.0f));
+    bool3 outsideH_top = bool3(horiz.x && (CY_top.x < 0.0f), horiz.y && (CY_top.y < 0.0f), horiz.z && (CY_top.z < 0.0f));
+    bool3 outsideH_bottom = bool3(horiz.x && (CY_bottom.x < 0.0f), horiz.y && (CY_bottom.y < 0.0f), horiz.z && (CY_bottom.z < 0.0f));
 
-    if (glm::any(outsideH)) return 0x00;
+    // if both top and bottom are outside for any edge, the whole row is outside
+    if (glm::any(outsideH_top & outsideH_bottom)) return 0x00;
 
-    // find x where each (non‑horizontal) edge hits the scan‑line
-    // cross = -(B*y + C)/A — we’ll never use the horizontal components
-    float3 cross = -(CY / A);   // A==0 gives ±INF or NaN, but masked out below
+    // compute intersection points for top and bottom lines
+    auto compute_bounds = [&](float3 CY) -> float2 {
+        // avoid division by zero, masked out later by pos/neg masks
+        float3 cross = glm::mix(float3(0.0f), -(CY / A), glm::notEqual(A, float3(0.0f)));
 
-    // merge positive half‑spaces
-    // A > 0  -> lower bound  (x ≥ cross)
-    // A < 0  -> upper bound  (x ≤ cross)
-    bool3  pos = glm::greaterThan(A, float3(0.0f));
-    bool3  neg = glm::lessThan   (A, float3(0.0f));
+        bool3 pos = glm::greaterThan(A, float3(0.0f));
+        bool3 neg = glm::lessThan(A, float3(0.0f));
 
-    float lower = glm::compMax(glm::mix(float3(-FLT_MAX), cross, pos));
-    float upper = glm::compMin(glm::mix(float3( FLT_MAX), cross, neg));
+        float lower = glm::compMax(glm::mix(float3(-FLT_MAX), cross, pos));
+        float upper = glm::compMin(glm::mix(float3( FLT_MAX), cross, neg));
+
+        return {lower, upper};
+    };
+
+    auto [lower_top, upper_top]       = compute_bounds(CY_top);
+    auto [lower_bottom, upper_bottom] = compute_bounds(CY_bottom);
+
+    // combine bounds to conservatively cover whole vertical span
+    float lower = fminf(lower_top, lower_bottom);
+    float upper = fmaxf(upper_top, upper_bottom);
 
     if (lower > upper) return 0x00; // no overlap with the row
 
-    // snap to pixel centres, convert to tile indices, build mask (same as before)
-    float xStart = ceilf (lower);
-    float xEnd   = floorf(upper);
+    // snap to pixel centers and convert to tile indices
+    // using floorf for start and ceilf for end to cull tiles conservatively
+    float xStart = floorf(lower);
+    float xEnd   = ceilf(upper);
 
-    int left  = max(0,              int((xStart - bin_x_pix) / TILE_SIZE));
-    int right = min(TILE_COUNT - 1, int((xEnd   - bin_x_pix) / TILE_SIZE));
+    int left  = max(0,              int((xStart - bin_x_pix) / TILE_SIZE) - 1); // +1 and -1 for conservative culling
+    int right = min(TILES_PER_BIN - 1, int((xEnd   - bin_x_pix) / TILE_SIZE) + 1);
 
     if (right < left) return 0x00;
 
+    // Build mask: set bits for tiles covered between left and right
     uint8_t mask = uint8_t(0xFFu >> (8 - (right - left + 1))) << left;
+
     return mask;
 }
