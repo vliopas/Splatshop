@@ -421,7 +421,6 @@ void rasterizeLargeTriangles_block(
        binPrefixSum[block.thread_rank()] = exclusiveOffset;
 	
 	int binShift = 0;
-	bool threadIsDone = false; // thread local flag to indicate if the thread is done processing bins
     block.sync(); // synchronize threads to ensure all prefix sums are computed
     
     // Calculate the total number of bins from the binGroups and prefix sum
@@ -438,27 +437,22 @@ void rasterizeLargeTriangles_block(
         // each bin element will contain the triangle index, bin coordinates, and a tile coverage mask  
         // now each thread will process one bin and for each bin, we will compute the tile mask
         int binsThisPass = min(numOfBins, binShift + MAX_BIN_SIZE); // process bins in chunks of MAX_BIN_SIZE
-        for(int binIdx = block.thread_rank() + binShift; binIdx < binsThisPass; binIdx += block.size())
+        for(uint16_t binIdx = block.thread_rank() + binShift; binIdx < binsThisPass; binIdx += block.size())
         {
             // atomicAdd(&counter, 1);
-            int binGroupIndex = find_bin_group_idx(binIdx, binPrefixSum, binGroups.count);
-            int localBinIndex = binIdx - binPrefixSum[binGroupIndex];
+            uint16_t binGroupIndex = find_bin_group_idx(binIdx, binPrefixSum, binGroups.count);
+            uint16_t localBinIndex = binIdx - binPrefixSum[binGroupIndex];
             const BinGroup bg = binGroups.buf[binGroupIndex]; // 4‑byte read
-            int   binW   = int(bg.binW); // promote to int once
             
-            // bin coordinates inside group's rectangle
-            int binXoffset = localBinIndex % binW;
-            int binYoffset = localBinIndex / binW;	
-            
-			int binPixX = (bg.binX + binXoffset) * BIN_SIZE;
-            int binPixY = (bg.binY + binYoffset) * BIN_SIZE;
+			int binPixX = (bg.binX + localBinIndex % bg.binW) * BIN_SIZE;
+            int binPixY = (bg.binY + localBinIndex / bg.binW) * BIN_SIZE;
             
             const vec4* tri = &sh_positions[3 * bg.triangleIndex];
             vec3 A, B, C;
-            tri_edge_coeffs(tri, A, B, C);
+            tri_edge_coeffs_conservative(tri, A, B, C);
             
             uint64_t mask = 0ull; 
-            for (int ty = 0; ty < TILES_PER_BIN; ++ty) {
+            for (uint8_t ty = 0; ty < TILES_PER_BIN; ++ty) {
                 mask |= uint64_t(row_span_mask(A, B, C, binPixX, binPixY, ty)) << (ty * 8);
             }
             if (mask == 0ull) continue; 
@@ -466,27 +460,26 @@ void rasterizeLargeTriangles_block(
             BinElement& dst = binElements.buf[atomicAdd(&binElements.count, 1)];
             dst.pack(
                 static_cast<uint8_t>(bg.triangleIndex),
-                static_cast<uint16_t>(bg.binX + binXoffset),
-                static_cast<uint16_t>(bg.binY + binYoffset)
+                static_cast<uint16_t>(bg.binX + localBinIndex % bg.binW),
+                static_cast<uint16_t>(bg.binY + localBinIndex / bg.binW)
             );
             dst.setMask(mask);
         }
 
         block.sync();
-
+        
         int numOfMasks = binElements.count;
         binShift += (binsThisPass != numOfBins) * MAX_BIN_SIZE;
-        threadIsDone = binsThisPass == numOfBins; // if the number of masks is less than MAX_BIN_SIZE, we are done processing bins
 
         // STAGE 2 - Bin Elements -> Tile Elements
         // each tile element will contain the triangle index and the tile coordinates in pixel units
 
-        constexpr uint32_t lanesPerMask = TILE_SIZE * TILE_SIZE;
-        const uint32_t warpId     = (block.thread_rank() >> 5) & 1;
-        const uint32_t warpLane     = block.thread_rank() & 31;   // 0..31
-        const uint32_t masksPerBlock = block.size() / lanesPerMask;
+        constexpr uint16_t lanesPerMask = TILE_SIZE * TILE_SIZE;
+        const uint8_t warpId     = (block.thread_rank() >> 5) & 1;
+        const uint8_t warpLane     = block.thread_rank() & 31;   // 0..31
+        const uint16_t masksPerBlock = block.size() / lanesPerMask;
     
-        for (uint32_t maskIdx = 0; maskIdx < numOfMasks; maskIdx += masksPerBlock)
+        for (uint16_t maskIdx = 0; maskIdx < numOfMasks; maskIdx += masksPerBlock)
         {
             BinElement tm;
 
@@ -500,11 +493,11 @@ void rasterizeLargeTriangles_block(
             uint16_t binX  =  tm.getBinX();
             uint16_t binY  =  tm.getBinY();
             uint32_t slice32 = ((warpId == 0) ? tm.maskLo : tm.maskHi);
-            uint32_t myBit = slice32 & (1u << warpLane);
+            bool myBit = (slice32 & (1u << warpLane)) != 0;
             if (!myBit) continue;                // this lane’s bit is 0 - nothing to do
 
             // compute the tile coordinates inside the bin
-            int bitGlobal = warpLane + warpId * 32;
+            uint8_t bitGlobal = warpLane + warpId * 32;
             int tileX = (binX * TILES_PER_BIN + (bitGlobal & 7)) * TILE_SIZE; // pixel coordinates
             int tileY = (binY * TILES_PER_BIN + (bitGlobal >> 3)) * TILE_SIZE;
 
@@ -520,7 +513,7 @@ void rasterizeLargeTriangles_block(
         
         int numOfTiles = tileElements.count;
         
-        for (uint32_t i = block.thread_rank(); i < numOfTiles; i+= block.size()) 
+        for (uint16_t i = block.thread_rank(); i < numOfTiles; i+= block.size()) 
         {
             using bool3 = glm::bvec3;
             using float3 = glm::vec3;
@@ -530,36 +523,37 @@ void rasterizeLargeTriangles_block(
             int tileY = te.binY;
 
             // compute the screen-space bounding rectangle of the tile
-            float min_y = (float)tileY;
-            float min_x = (float)tileX;
-            float max_y = min_y + TILE_SIZE;
-            float max_x = min_x + TILE_SIZE;
+            int min_y = tileY;
+            int min_x = tileX;
+            int max_y = min_y + TILE_SIZE;
+            int max_x = min_x + TILE_SIZE;
 
             // clamp to screen
-            min_y = clamp(min_y, 0.0f, (float)target.height);
-            max_y = clamp(max_y, 0.0f, (float)target.height);
-            min_x = clamp(min_x, 0.0f, (float)target.width);
-            max_x = clamp(max_x, 0.0f, (float)target.width);
+            min_y = clamp(min_y, 0, target.height);
+            min_x = clamp(min_x, 0, target.width);
+            max_y = clamp(max_y, 0, target.height);
+            max_x = clamp(max_x, 0, target.width);
             
             const vec4* tri = &sh_positions[3 * te.triangleIndex];
             vec3 A, B, C;
             tri_edge_coeffs(tri, A, B, C);
             
-            vec2 e0 = { tri[1].x - tri[0].x, tri[1].y - tri[0].y };
-            vec2 e1 = { tri[2].x - tri[0].x, tri[2].y - tri[0].y };
-            float invArea = 1.0f / (e0.x * e1.y - e0.y * e1.x);
-
-            for(int y = min_y; y < max_y; y++)
-            {
-                float3 CY = B * float(y) + C;
-                bool3 horiz = glm::equal(A, float3(0.0f));
+            bool3 horiz = glm::equal(A, float3(0.0f));
+            bool3 pos = glm::greaterThan(A, float3(0.0f));
+            bool3 neg = glm::lessThan(A, float3(0.0f));
+            
+            vec2 pFrag = {(float)min_x, (float)min_y};
+            float3 invA = {A.x == 0 ? 1e8 : 1.0f / A.x, A.y == 0 ? 1e8 : 1.0f/ A.y, A.z == 0 ? 1e8 : 1.0f /A.z};
+            float invArea = 1.0f / (B.x * A.z - A.x * B.z);
+            
+            float3 CY = B * float(min_y) + C;
+            
+            for(int y = min_y; y < max_y; y++, CY += B, pFrag.y++)
+            { 
                 bool3 outsideH = bool3( horiz.x && (CY.x < 0.0f), horiz.y && (CY.y < 0.0f), horiz.z && (CY.z < 0.0f));
-
                 if (glm::any(outsideH)) continue; // skip rows outside the triangle
                 
-                float3 cross = - (CY / A);
-                bool3 pos = glm::greaterThan(A, float3(0.0f));
-                bool3 neg = glm::lessThan(A, float3(0.0f));
+                float3 cross = - (CY * invA);
 
                 float lower = glm::compMax( glm::mix(float3(-FLT_MAX), cross, pos));
                 float upper = glm::compMin( glm::mix(float3( FLT_MAX), cross, neg));
@@ -568,18 +562,16 @@ void rasterizeLargeTriangles_block(
                 int ix0 = int(ceilf(lower));
                 int ix1 = int(floorf(upper));
 
-                if (ix1 < 0 || ix0 >= int(target.width)) continue; // completely outside the screen
-
                 ix0 = clamp(ix0, (int)min_x, (int)max_x); // clamp within tile width
                 ix1 = clamp(ix1, (int)min_x, (int)max_x);
-
-                for(int x = ix0; x < ix1; x++)
+                
+                pFrag.x = ix0;
+                for(int x = ix0; x < ix1; x++, pFrag.x++)
                 {
-                    vec2 pFrag = {float(x), float(y)};
                     vec2 sample = {pFrag.x - tri[0].x, pFrag.y - tri[0].y};
 
-                    float s = (sample.x * e1.y - sample.y * e1.x) * invArea;
-                    float t = (e0.x * sample.y - e0.y * sample.x) * invArea;
+                    float s = (sample.x * A.z + sample.y * B.z) * invArea;
+                    float t = (B.x * sample.y + A.x * sample.x) * invArea;
                     float v = 1.0f - s - t;
                     
                     uint32_t color = computeColor(te.triangleIndex + triangleOffset, geometry, material, material.texture, s, t, v);
@@ -598,7 +590,7 @@ void rasterizeLargeTriangles_block(
             }
         }
 
-        if(syncthreads_and((int)threadIsDone)) break; // if all blocks are done, exit the loop
+        if(syncthreads_and(binsThisPass == numOfBins)) break; // if all blocks are done, exit the loop
         if(block.thread_rank() == 0){
             binElements.count = 0; // reset binElements buffer
             tileElements.count = 0; // reset tileElements buffer
