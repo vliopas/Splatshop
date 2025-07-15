@@ -176,65 +176,50 @@ __device__ void tri_edge_coeffs_conservative(const vec4* __restrict__ tri,
 }
 
 // bit‑span mask for a single 8‑tile row (ty) inside the bin
-__device__  uint8_t row_span_mask(const vec3& A, const vec3& B, const vec3& C, 
+__device__ uint8_t row_span_mask(const vec3& A, const vec3& B, const vec3& C, 
     int bin_x_pix, int bin_y_pix, int ty)
 {
     using float3 = glm::vec3;
     using bool3 = glm::bvec3;
     constexpr float epsilon = 1e-6;
-    
-    // sample Y at the top and bottom of the tile row
-    float y_top    = float(bin_y_pix + ty * TILE_SIZE);
-    float y_bottom = float(bin_y_pix + (ty + 1) * TILE_SIZE);
-    vec3 len = A*A + B*B; // length² per edge
-    len  =         vec3(sqrt(len.x),
-                        sqrt(len.y),
-                        sqrt(len.z));
-    float3 Cnew = C + 0.5f * TILE_SIZE* len;   
-    // compute CY at top and bottom sample lines
-    float3 CY_top    = B * y_top + Cnew;
-    float3 CY_bottom = B * y_bottom + Cnew;
 
-    // horizontal-edge cull for top and bottom sample lines
+    // Sample Y at the middle of the tile row
+    float y_row = float(bin_y_pix + (ty + 0.5f) * TILE_SIZE);
+
+    vec3 len = A * A + B * B; // length² per edge
+    len = vec3(sqrt(len.x), sqrt(len.y), sqrt(len.z));
+    float3 Cnew = C + 0.5f * TILE_SIZE * len;
+
+    // Compute CY at mid sample line
+    float3 CY = B * y_row + Cnew;
+
+    // Horizontal-edge cull at mid sample line
     bool3 horiz = {abs(A.x) < epsilon, abs(A.y) < epsilon, abs(A.z) < epsilon};
-    bool3 outsideH_top = bool3(horiz.x && (CY_top.x < 0.0f), horiz.y && (CY_top.y < 0.0f), horiz.z && (CY_top.z < 0.0f));
-    bool3 outsideH_bottom = bool3(horiz.x && (CY_bottom.x < 0.0f), horiz.y && (CY_bottom.y < 0.0f), horiz.z && (CY_bottom.z < 0.0f));
+    bool3 outsideH_mid = bool3(horiz.x && (CY.x < 0.0f), 
+                               horiz.y && (CY.y < 0.0f), 
+                               horiz.z && (CY.z < 0.0f));
 
-    // if both top and bottom are outside for any edge, the whole row is outside
-    if (glm::any(outsideH_top & outsideH_bottom)) return 0x00;
+    // If any edge is outside at mid line, cull the row
+    if (glm::any(outsideH_mid)) return 0x00;
 
     float3 invA = glm::mix(1.0f / A, float3(1e8f), horiz);
 
-    // compute intersection points for top and bottom lines
-    auto compute_bounds = [&](float3 CY) -> float2 {
-        // avoid division by zero, masked out later by pos/neg masks
-        float3 cross = - CY * invA;
+    // Compute intersection bounds at mid sample line
+    float3 cross = -CY * invA;
+    bool3 pos = glm::greaterThan(A, float3(epsilon));
+    bool3 neg = glm::lessThan(A, float3(-epsilon));
 
-        bool3 pos = glm::greaterThan(A, float3(epsilon));
-        bool3 neg = glm::lessThan(A, float3(epsilon));
+    float lower = glm::compMax(glm::mix(float3(-FLT_MAX), cross, pos));
+    float upper = glm::compMin(glm::mix(float3( FLT_MAX), cross, neg));
 
-        float lower = glm::compMax(glm::mix(float3(-FLT_MAX), cross, pos));
-        float upper = glm::compMin(glm::mix(float3( FLT_MAX), cross, neg));
+    if (lower > upper) return 0x00; // no overlap with row
 
-        return {lower, upper};
-    };
-
-    auto [lower_top, upper_top]       = compute_bounds(CY_top);
-    auto [lower_bottom, upper_bottom] = compute_bounds(CY_bottom);
-
-    // combine bounds to conservatively cover whole vertical span
-    float lower = fminf(lower_top, lower_bottom);
-    float upper = fmaxf(upper_top, upper_bottom);
-
-    if (lower > upper) return 0x00; // no overlap with the row
-
-    // snap to pixel centers and convert to tile indices
-    // using floorf for start and ceilf for end to cull tiles conservatively
+    // Snap to pixel centers and convert to tile indices
     float xStart = floorf(lower);
     float xEnd   = ceilf(upper);
 
-    int left  = max(0, int((xStart - bin_x_pix) / TILE_SIZE)); // +1 and -1 for conservative culling
-    int right = min(TILES_PER_BIN - 1, int((xEnd   - bin_x_pix) / TILE_SIZE));
+    int left  = max(0, int((xStart - bin_x_pix) / TILE_SIZE));
+    int right = min(TILES_PER_BIN - 1, int((xEnd - bin_x_pix) / TILE_SIZE));
 
     if (right < left) return 0x00;
 

@@ -542,13 +542,23 @@ void rasterizeLargeTriangles_block(
             bool3 pos = glm::greaterThan(A, float3(0.0f));
             bool3 neg = glm::lessThan(A, float3(0.0f));
             
-            vec2 pFrag = {(float)min_x, (float)min_y};
-            float3 invA = {A.x == 0 ? 1e8 : 1.0f / A.x, A.y == 0 ? 1e8 : 1.0f/ A.y, A.z == 0 ? 1e8 : 1.0f /A.z};
+            float3 invA = {A.x == 0 ? 1e8 : 1.0f / A.x, A.y == 0 ? 1e8 : 1.0f / A.y, A.z == 0 ? 1e8 : 1.0f / A.z};
             float invArea = 1.0f / (B.x * A.z - A.x * B.z);
             
+            vec2 sample = {(float)min_x - tri[0].x, (float)min_y - tri[0].y};
             float3 CY = B * float(min_y) + C;
+
+            // precompute these once outside the loop
+            float ds_dx = A.z * invArea;
+            float dt_dx = A.x * invArea;
+
+            float ds_dy = B.z * invArea;
+            float dt_dy = B.x * invArea;
+
+            float s = sample.y * ds_dy;
+            float t = sample.y * dt_dy;
             
-            for(int y = min_y; y < max_y; y++, CY += B, pFrag.y++)
+            for(int y = min_y; y < max_y; y++, CY += B, sample.y++, s += ds_dy, t += dt_dy)
             { 
                 bool3 outsideH = bool3( horiz.x && (CY.x < 0.0f), horiz.y && (CY.y < 0.0f), horiz.z && (CY.z < 0.0f));
                 if (glm::any(outsideH)) continue; // skip rows outside the triangle
@@ -559,27 +569,25 @@ void rasterizeLargeTriangles_block(
                 float upper = glm::compMin( glm::mix(float3( FLT_MAX), cross, neg));
                 if( lower > upper) continue; // skip rows outside the triangle
 
-                int ix0 = int(ceilf(lower));
-                int ix1 = int(floorf(upper));
+                int ix0 = int(floorf(lower));
+                int ix1 = int(ceilf(upper));
 
                 ix0 = clamp(ix0, (int)min_x, (int)max_x); // clamp within tile width
                 ix1 = clamp(ix1, (int)min_x, (int)max_x);
                 
-                pFrag.x = ix0;
-                for(int x = ix0; x < ix1; x++, pFrag.x++)
-                {
-                    vec2 sample = {pFrag.x - tri[0].x, pFrag.y - tri[0].y};
+                sample.x = ix0 - tri[0].x;
+                s += sample.x * ds_dx;
+                t += sample.x * dt_dx;
 
-                    float s = (sample.x * A.z + sample.y * B.z) * invArea;
-                    float t = (B.x * sample.y + A.x * sample.x) * invArea;
+                for(int x = ix0; x < ix1; x++, sample.x++, s += ds_dx, t += dt_dx)
+                {
                     float v = 1.0f - s - t;
                     
                     uint32_t color = computeColor(te.triangleIndex + triangleOffset, geometry, material, material.texture, s, t, v);
                     uint8_t* rgb = (uint8_t*)&color;
 
-                    int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
+                    int2 pixelCoords = make_int2(x, y);
                     int pixelID = pixelCoords.x + pixelCoords.y * target.width;
-                    pixelID = clamp(pixelID, 0, int(target.width * target.height) - 1);
 
                     float depth = v * tri[0].w + s * tri[1].w + t * tri[2].w;
                     uint64_t udepth = *((uint32_t*)&depth);
@@ -587,6 +595,9 @@ void rasterizeLargeTriangles_block(
 
                     atomicMin(&target.framebuffer[pixelID], pixel);
                 }
+
+                s -= sample.x * ds_dx;
+                t -= sample.x * dt_dx;
             }
         }
 
