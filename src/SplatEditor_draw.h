@@ -1504,7 +1504,7 @@ void SplatEditor::draw(Scene* scene, vector<RenderTarget> targets){
 				settings.stream = mainstream;
 
                 if(SplatEditor::instance->settings.rasterizeLargeTriangles)
-				    prog_triangles->launchCooperative("kernel_drawLargeTriangleQueue", { &launchArgs, &queue, &target }, settings);
+				    prog_triangles->launchCooperative("kernel_persistentDraw", { &launchArgs, &queue, &target }, settings);
                 else
                     prog_triangles->launchCooperative("kernel_drawTriangleQueue", { &launchArgs, &queue, &target }, settings);
 			}
