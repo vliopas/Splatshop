@@ -621,15 +621,17 @@ inline void trianglesToBinQueues(
     __shared__ struct{ int count; BinGroup buf[TRIANGLES_PER_SWEEP]; } binGroups;
     __shared__ uint16_t writeIndicesPerBin[MAX_NUMBER_OF_BINS]; // indices for each bin
     __shared__ uint32_t reprocessTriangleBatch;                 // flag (bitset) to for tris in batch to reprocess
+    __shared__ uint32_t reprocessTriangleBatchOld;
 
     int numTrianglesInBlock = min(int(geometry.count) - triangleOffset, TRIANGLES_PER_SWEEP);
 
     if (numTrianglesInBlock <= 0)
         return;
 
-    if (!state.reprocessTriangleBatch && block.thread_rank() == 0)
+    if (block.thread_rank() == 0)
     {
-        binGroups.count = 0;        // reset bin group count
+        binGroups.count = state.reprocessTriangleBatch ? binGroups.count : 0;
+        reprocessTriangleBatchOld = state.reprocessTriangleBatch ? reprocessTriangleBatch : 0;
         reprocessTriangleBatch = 0; // reset reprocess flag
     }
 
@@ -650,6 +652,8 @@ inline void trianglesToBinQueues(
         writeIndicesPerBin[i] = 0xffffu; // reset write indices for each bin
 
     block.sync();
+    int binsPerRow = (target.width + BIN_SIZE - 1) / BIN_SIZE;
+    int binsPerCol = (target.height + BIN_SIZE - 1) / BIN_SIZE;
 
     if (!state.reprocessTriangleBatch)
         for (
@@ -712,10 +716,12 @@ inline void trianglesToBinQueues(
 
                 // update bin queue
                 uint32_t slot = atomicAdd(&binGroups.count, 1);
+                uint8_t bw = uint8_t(min(bx1 - bx0 + 1, binsPerRow - bx0));
+                uint8_t bh = uint8_t(min(by1 - by0 + 1, binsPerCol - by0));
+
                 binGroups.buf[slot] = {(uint16_t)i,
-                                       (uint16_t)bx0, (uint16_t)by0,
-                                       uint8_t(bx1 - bx0 + 1),
-                                       uint8_t(by1 - by0 + 1)};
+                                    (uint16_t)bx0, (uint16_t)by0,
+                                    bw, bh};
             }
         }
 
@@ -726,7 +732,7 @@ inline void trianglesToBinQueues(
         const BinGroup &bg = binGroups.buf[i];
         int numOfBins = bg.binW * bg.binH;
 
-        bool reprocessFlag = (reprocessTriangleBatch & (1u << bg.triangleIndex)) != 0;
+        bool reprocessFlag = (reprocessTriangleBatchOld & (1u << bg.triangleIndex)) != 0;
         if (state.reprocessTriangleBatch && !reprocessFlag)
             continue;
 
@@ -734,13 +740,11 @@ inline void trianglesToBinQueues(
         triRef.pack(
             static_cast<uint32_t>(state.triangleQueueIndex),
             static_cast<uint32_t>(triangleOffset + bg.triangleIndex));
-        int binsPerRow = (target.width + BIN_SIZE - 1) / BIN_SIZE;
 
         for (uint16_t binIdx = block.thread_rank(); binIdx < numOfBins; binIdx += block.size())
         {
             int binX = bg.binX + binIdx % bg.binW;
             int binY = bg.binY + binIdx / bg.binW;
-
             int globalBinID = binX + binY * binsPerRow;
             int index = binQueues[globalBinID].push(triRef);
             if (index < 0)
@@ -749,20 +753,23 @@ inline void trianglesToBinQueues(
                 atomicOr(&reprocessTriangleBatch, 1u << bg.triangleIndex);
                 break;
             }
-            writeIndicesPerBin[globalBinID] = (uint16_t)index;
+            writeIndicesPerBin[globalBinID] = (uint16_t)index; // if -1 it will become 0xffff so its fine
         }
         block.sync();
 
         for (uint16_t binIdx = block.thread_rank(); binIdx < totalBins; binIdx += block.size())
         {
-            auto &writeIdx = writeIndicesPerBin[binIdx];
-            if (writeIdx == 0xffffu)
-                continue;
-
-            // update the read index for the bin
-            binQueues[binIdx][writeIdx].setState(reprocessFlag ? TriangleRef::INVALID : TriangleRef::VALID);
-            writeIdx = 0xffffu; // reset write index for this bin to ready for next iteration
+            auto writeIdx = writeIndicesPerBin[binIdx];
+            if (writeIdx != 0xffffu)
+            {
+                binQueues[binIdx][writeIdx].setState(((reprocessTriangleBatch & (1u << bg.triangleIndex)) != 0)
+                ? TriangleRef::INVALID : TriangleRef::VALID);
+                assert(!binQueues[binIdx][writeIdx].isTentative());
+                writeIndicesPerBin[binIdx] = 0xffffu; // reset write index for this bin to ready for next iteration
+            }
         }
+        
+        block.sync();
     }
 
     if (block.thread_rank() == 0)
@@ -776,6 +783,7 @@ inline void rasterizeBin(
     int binID)
 {
     auto block = cg::this_thread_block();
+    auto grid = cg::this_grid();
 
     mat4 transform = target.proj * target.view; // * geometry.transform
 
@@ -807,15 +815,15 @@ inline void rasterizeBin(
 
         numTrianglesToRasterize = 0; // reset triangle count
         numOfTilesToRasterize = 0; // reset tile count
-
+        
         uint32_t queueSize = binQueues[binID].size();
         uint32_t readIdx = binQueues[binID].getReadIndex();
+
+        int i = TRIANGLES_PER_SWEEP;
         for (; numTrianglesToRasterize < queueSize && numTrianglesToRasterize < TRIANGLES_PER_SWEEP; ++numTrianglesToRasterize)
         {
             const TriangleRef& tri = binQueues[binID][readIdx + numTrianglesToRasterize];
-
-            if (tri.isTentative())
-                break; // stop at first tentative triangle
+            if (tri.isTentative()) break;
         }
     }
 

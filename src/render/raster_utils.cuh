@@ -133,8 +133,8 @@ public:
         }
     }
 
-    TriangleRef &operator[](uint32_t index) { return triangleIndices[index % capacity()]; }
-    const TriangleRef &operator[](uint32_t index) const { return triangleIndices[index % capacity()]; }
+    TriangleRef &operator[](uint32_t index) { return triangleIndices[index]; }
+    const TriangleRef &operator[](uint32_t index) const { return triangleIndices[index]; }
     uint32_t getReadIndex() const { return readIdx; }
 
     void clear()
@@ -233,24 +233,6 @@ void prefixSum<BinGroup>(
 
     block.sync(); // make data visible
 }
-
-// conservative rectangle test
-// Akenine-Möller, Tomas, and Timo Aila. "Conservative and tiled rasterization using a modified triangle set-up."
-// Journal of graphics tools 10.3 (2005): 1-8.
-__device__ bool rect_outside_tri(const float (&A)[3], const float (&B)[3],
-                                 const float (&C)[3], int x, int y,
-                                 int w, int h)
-{
-#pragma unroll
-    for (int k = 0; k < 3; ++k)
-    {
-        int cx = (A[k] >= 0.f) ? w : 0;
-        int cy = (B[k] >= 0.f) ? h : 0;
-        if (A[k] * (x + cx) + B[k] * (y + cy) + C[k] < 0.f)
-            return true; // fully outside this edge
-    }
-    return false; // partly or fully inside
-};
 
 // binary‑search prefix sum to map global‑bin -> group index
 __device__ __forceinline__ uint16_t find_bin_group_idx(uint16_t bin,
