@@ -212,7 +212,32 @@ export LD_LIBRARY_PATH=~/gcc-14.1.0/x86_64-linux-gnu/libstdc++-v3/src/.libs:$LD_
 - ```update()``` is called every frame and handles most things. 
 - ```makeToolbarSettings()``` allows you do specify an imgui user interface that is shown below the toolbar while your action is active. 
 - Add your action to [toolbar.h](src/gui/toolbar.h). Include it and add a Button or ImageButton, similar to other actions. When the button is clicked, create a shared_ptr of your action and call setAction(action) to activate it. It will automatically be deactivated on right-click. 
-- If you need to add an icon, you can add one to [symbols.svg](resources/images/symbols.svg) and export it to symbols_32x32.png. 
+- If you need to add an icon, you can add one to [symbols.svg](resources/images/symbols.svg) and export it to symbols_32x32.png.
+
+## Rendering of Large Triangles Optimization
+
+### Abstract
+
+The software rasterizer for Splatshop typically passes through the entire list of primitives and assigns them in batches to thread blocks for rendering. Each block handles specific primitives but for cases where there exists multiple larger triangles on the scene, this can hinder performance by dubious work distribution amidst the blocks. While others blocks handle smaller primitives and idle away others have to shade thousands of fragments belonging to a single large triangle that they have to handle on their own.
+
+For that reason, we attempted to construct a hierarchical tiled rasterizer to tackle the issue of rendering large triangles. The screen is segmented to bins of 64x64 pixels, and further subdivided into tiles of 8x8 pixels. We go through calculating bin coverage, tile coverage and eventually pixel coverage which allows to distribute work based on areas of the screen rather than primitives. In case of larger triangles this achieves better occupancy hence better performance than before.
+
+For a more detailed explanation of the algorithm, see ```report.pdf``` in the repo's root folder.
+
+### Installation
+
+Only minor changes have been done on the cmake file in the root folder so for installing, the instructions [here](#Installing) are sufficient.
+
+### Examples
+
+<table>
+	<tr>
+		<td><img src="./docs/largeTris_0.jpg" /></td>
+		<td><img src="./docs/largeTris_1.jpg" /></td>
+	</tr>
+</table>
+
+Above we see screenshots from approximately the same incidence angle on the same geometry. As we zoom in closer the screen begins to be dominated by large triangles (which we specify as roughly > 4000 fragments of area). For accurate benchmarking, triangles with area below that threshold, deemed smaller, are filtered out of further processing and therefore **not rendered** which explains the empty spaces in the screenshots.
 
 ## Acknowledgements
 

@@ -697,7 +697,16 @@ void SplatEditor::makeToolbar(){
 
 			ImGui::SameLine();
 			ImGui::Checkbox("Cull Small Splats", &settings.cullSmallSplats);
-            ImGui::Checkbox("Rasterize Large Triangles", &settings.rasterizeLargeTriangles);
+            // ImGui::Checkbox("Rasterize Large Triangles", &settings.rasterMode);
+
+            RasterizationMode& rasterMode = settings.rasterMode; // your current setting
+
+            if (ImGui::RadioButton("Small Only", rasterMode == RASTERIZE_SMALL_ONLY))
+                rasterMode = RASTERIZE_SMALL_ONLY;
+            if (ImGui::RadioButton("Persistent Kernel", rasterMode == RASTERIZE_PERSISTENT_KERNEL))
+                rasterMode = RASTERIZE_PERSISTENT_KERNEL;
+            if (ImGui::RadioButton("2 Phases", rasterMode == RASTERIZE_2_PHASE))
+                rasterMode = RASTERIZE_2_PHASE;
 
 			// ImGui::SameLine(); ImGui::Text("          ");
 

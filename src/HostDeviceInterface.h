@@ -285,6 +285,59 @@ struct TriangleData{
 	uint32_t* indices = nullptr;
 };
 
+struct TriangleRef
+{
+    // Bit layout: [31:30] state (2 bits), [29:20] geometryId (10 bits), [19:0] triangleId (20 bits)
+    static constexpr uint32_t STATE_BITS = 2;
+    static constexpr uint32_t GEOM_ID_BITS = 10;
+    static constexpr uint32_t TRI_ID_BITS = 20;
+
+    static constexpr uint32_t TRI_ID_MASK = (1u << TRI_ID_BITS) - 1;                  // 0x000FFFFF
+    static constexpr uint32_t GEOM_ID_MASK = (1u << GEOM_ID_BITS) - 1;                // 0x000003FF
+    static constexpr uint32_t STATE_MASK = (1u << STATE_BITS) - 1;                    // 0x00000003
+
+    static constexpr uint32_t TRI_ID_SHIFT = 0;
+    static constexpr uint32_t GEOM_ID_SHIFT = TRI_ID_BITS;
+    static constexpr uint32_t STATE_SHIFT = TRI_ID_BITS + GEOM_ID_BITS;
+
+    enum State : uint32_t
+    {
+        INVALID   = 0b00,
+        TENTATIVE = 0b01,
+        VALID     = 0b10
+        // 0b11 is unused
+    };
+
+    uint32_t packed;
+
+    inline void pack(uint32_t geometryId, uint32_t triangleId, State state = TENTATIVE)
+    {
+        packed = ((state & STATE_MASK)     << STATE_SHIFT) |
+                 ((geometryId & GEOM_ID_MASK) << GEOM_ID_SHIFT) |
+                 ((triangleId & TRI_ID_MASK) << TRI_ID_SHIFT);
+    }
+
+    inline void setState(State state)
+    {
+        packed = (packed & ~(STATE_MASK << STATE_SHIFT)) |
+                 ((state & STATE_MASK) << STATE_SHIFT);
+    }
+    
+    inline bool isValid() const     { return getState() == VALID; }
+    inline bool isTentative() const { return getState() == TENTATIVE; }
+    inline bool isInvalid() const   { return getState() == INVALID; }
+    
+    inline State getState() const { return static_cast<State>((packed >> STATE_SHIFT) & STATE_MASK); }
+    inline uint32_t getTriangleId() const { return (packed >> TRI_ID_SHIFT) & TRI_ID_MASK;}
+    inline uint32_t getGeometryId() const { return (packed >> GEOM_ID_SHIFT) & GEOM_ID_MASK; }
+};
+
+struct BinElement
+{
+    TriangleRef triangleRef;
+    uint16_t binID;
+};
+
 struct Splat{
 	vec3 position;
 	vec3 scale;
